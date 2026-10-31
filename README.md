@@ -30,6 +30,7 @@ It crawls all 57 property categories (29 rent + 28 sale) across the Kingdom, sto
 
 5. **In-Place Database Compaction (`-compact`)**
    - `aqar-crawler.exe -compact` streams, heals zombie `removed_at` flags, purges historical replica-jitter noise and false bounce removals, compresses all kept JSON records in parallel across all CPU cores, verifies row counts and `PRAGMA quick_check`, and atomically swaps the compacted SQLite file.
+   - **Production Benchmark on `AQAR.db`:** Shrunk the live archive from **16,573.4 MB (17.38 GB) to 680.0 MB (24.4x smaller — 15.89 GB saved)** while retaining **100% of all 178,320 listings** (full 115+ GraphQL fields byte-for-byte), healing **59,907** zombie `removed_at` records, and distilling `listing_history` from **2,126,974** rows down to **301,215** genuine history events (purging 1,243,601 replica-jitter/counter noise updates and 582,158 false pagination-drift removals).
 
 ---
 
