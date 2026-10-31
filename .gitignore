@@ -1,0 +1,25 @@
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# SQLite databases & journals
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.db.compact*
+*.db.bak*
+
+# Runtime logs & local config with credentials
+logs/
+config.json
+
+# Raw captures & legacy v1 reference folder
+requests-in-burp
+resp-*.json
+response.json
+AQAR-CRAWLER-v1/

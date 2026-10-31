@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>AQAR Crawler - Control Panel</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --border:#30363d; --text:#e6edf3;
+    --muted:#8b949e; --accent:#2f81f7; --green:#3fb950; --red:#f85149;
+    --yellow:#d29922; --bar-bg:#21262d;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  body{background:var(--bg); color:var(--text); font:14px/1.45 "Segoe UI", system-ui, sans-serif; padding:16px}
+  .wrap{max-width:1200px; margin:0 auto}
+  header{display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px}
+  h1{font-size:18px; font-weight:600}
+  .pill{padding:3px 12px; border-radius:20px; font-size:12px; font-weight:600; letter-spacing:.4px}
+  .pill.running{background:#0f2d1a; color:var(--green); border:1px solid var(--green)}
+  .pill.paused{background:#332a10; color:var(--yellow); border:1px solid var(--yellow)}
+  .pill.stopped{background:#2d1417; color:var(--red); border:1px solid var(--red)}
+  .spacer{flex:1}
+  .btn{padding:6px 14px; border-radius:6px; border:1px solid var(--border); background:var(--panel); color:var(--text); cursor:pointer; font-size:13px; font-weight:600}
+  .btn:hover{filter:brightness(1.25)}
+  .btn:disabled{opacity:.45; cursor:not-allowed}
+  .btn.primary{background:var(--accent); border-color:var(--accent); color:#fff}
+  .btn.danger{background:var(--red); border-color:var(--red); color:#fff}
+  .btn.warn{background:var(--yellow); border-color:var(--yellow); color:#111}
+  .cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:14px}
+  .card{background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:10px 12px}
+  .card .lbl{font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px}
+  .card .val{font-size:20px; font-weight:700; margin-top:2px; font-variant-numeric:tabular-nums}
+  .card .val.green{color:var(--green)} .card .val.red{color:var(--red)} .card .val.yellow{color:var(--yellow)} .card .val.blue{color:var(--accent)}
+  .panel{background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:12px 14px; margin-bottom:14px}
+  .panel h2{font-size:13px; color:var(--muted); text-transform:uppercase; letter-spacing:.6px; margin-bottom:10px}
+  .info-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:8px 20px; font-size:13px}
+  .info-grid b{color:var(--text)}
+  .info-grid .k{color:var(--muted)}
+  .errbox{background:#2d1417; border:1px solid var(--red); color:var(--red); border-radius:6px; padding:8px 12px; margin-top:8px; display:none; font-size:13px}
+  .cat{display:flex; align-items:center; gap:10px; padding:5px 0; font-size:13px}
+  .cat .name{width:230px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text)}
+  .cat .tag{width:64px; color:var(--muted); font-variant-numeric:tabular-nums}
+  .cat .bar{flex:1; height:14px; background:var(--bar-bg); border-radius:4px; overflow:hidden; position:relative}
+  .cat .bar i{display:block; height:100%; background:var(--accent); border-radius:4px; transition:width .4s}
+  .cat .bar i.done{background:var(--green)}
+  .cat .bar i.err{background:var(--red)}
+  .cat .pct{width:46px; text-align:right; font-variant-numeric:tabular-nums; color:var(--muted)}
+  .cat.active{outline:1px solid var(--accent); border-radius:4px; padding:5px 4px}
+  table{width:100%; border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums}
+  th,td{padding:5px 8px; text-align:right; border-bottom:1px solid var(--border); white-space:nowrap}
+  th:first-child,td:first-child{text-align:left}
+  .ok{color:var(--green)} .bad{color:var(--red)} .warn{color:var(--yellow)}
+  #logbox{background:#010409; border:1px solid var(--border); border-radius:6px; padding:10px; font:12px/1.5 Consolas,monospace; height:220px; overflow-y:auto; white-space:pre-wrap}
+  .muted{color:var(--muted)}
+  footer{margin-top:14px; color:var(--muted); font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>AQAR Crawler</h1>
+    <span id="pill" class="pill stopped">STOPPED</span>
+    <span id="addr" class="muted"></span>
+    <div class="spacer"></div>
+    <button id="btnPause" class="btn warn" onclick="ctrl('pause')">Pause</button>
+    <button id="btnResume" class="btn primary" onclick="ctrl('resume')">Resume</button>
+    <button id="btnStop" class="btn danger" onclick="ctrl('stop')">Stop</button>
+    <button id="btnStart" class="btn primary" onclick="ctrl('start')">Start</button>
+  </header>
+
+  <div id="errbox" class="errbox"></div>
+
+  <div class="cards">
+    <div class="card"><div class="lbl">Listings (db)</div><div class="val blue" id="cListings">-</div></div>
+    <div class="card"><div class="lbl">New (cycle)</div><div class="val green" id="cNew">-</div></div>
+    <div class="card"><div class="lbl">Updated (cycle)</div><div class="val yellow" id="cUpdated">-</div></div>
+    <div class="card"><div class="lbl">Removed (cycle)</div><div class="val" id="cRemoved">-</div></div>
+    <div class="card"><div class="lbl">Requests</div><div class="val" id="cRequests">-</div></div>
+    <div class="card"><div class="lbl">Pages</div><div class="val" id="cPages">-</div></div>
+    <div class="card"><div class="lbl">Seen (cycle)</div><div class="val" id="cSeen">-</div></div>
+    <div class="card"><div class="lbl">History rows</div><div class="val" id="cHistory">-</div></div>
+    <div class="card"><div class="lbl">Errors</div><div class="val red" id="cErrors">-</div></div>
+    <div class="card"><div class="lbl">DB size</div><div class="val" id="cDbsize">-</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>Cycle</h2>
+    <div class="info-grid">
+      <div><span class="k">Cycle #</span> <b id="iCycle">-</b></div>
+      <div><span class="k">Started</span> <b id="iStarted">-</b></div>
+      <div><span class="k">Uptime</span> <b id="iUptime">-</b></div>
+      <div><span class="k">Next cycle in</span> <b id="iNext">-</b></div>
+      <div><span class="k">ETA (this cycle)</span> <b id="iEta">-</b></div>
+      <div><span class="k">Pace</span> <b id="iPace">-</b></div>
+      <div><span class="k">Page size</span> <b id="iPageSize">-</b></div>
+      <div><span class="k">Cycle hours</span> <b id="iCycleHours">-</b></div>
+      <div><span class="k">Crawl window</span> <b id="iWindow">-</b></div>
+      <div><span class="k">Categories</span> <b id="iCats">-</b></div>
+      <div><span class="k">Database</span> <b id="iDb">-</b></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Category progress <span id="catCount" class="muted"></span></h2>
+    <div id="cats"></div>
+  </div>
+
+  <div class="panel">
+    <h2>History (last 10 cycles)</h2>
+    <table>
+      <thead><tr>
+        <th>Cycle</th><th>Status</th><th>Started</th><th>Req</th><th>Seen</th><th>New</th><th>Updated</th><th>Removed</th><th>Errors</th>
+      </tr></thead>
+      <tbody id="runs"></tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h2>Log <span class="muted" id="logMeta"></span></h2>
+    <div id="logbox"></div>
+  </div>
+
+  <footer id="foot"></footer>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let lastErrShown = "";
+let TOKEN = sessionStorage.getItem("aqar_token") || "";
+
+async function api(path, opts){
+  opts = opts || {};
+  if(TOKEN){
+    opts.headers = Object.assign({}, opts.headers||{}, {"X-Auth-Token": TOKEN});
+  }
+  const r = await fetch(path, opts);
+  if(r.status === 401){
+    TOKEN = prompt("This panel is protected. Enter the access token:") || "";
+    sessionStorage.setItem("aqar_token", TOKEN);
+    if(TOKEN){
+      opts.headers = Object.assign({}, opts.headers||{}, {"X-Auth-Token": TOKEN});
+      return await fetch(path, opts);
+    }
+  }
+  return r;
+}
+
+function fmt(n){
+  return n==null ? "-" : Number(n).toLocaleString("en-US");
+}
+function fmtDur(sec){
+  if(sec==null||sec<0) return "-";
+  sec=Math.floor(sec);
+  const h=Math.floor(sec/3600), m=Math.floor(sec%3600/60), s=sec%60;
+  if(h>0) return h+"h "+String(m).padStart(2,"0")+"m";
+  return m+"m "+String(s).padStart(2,"0")+"s";
+}
+function fmtDB(mb){
+  return mb==null ? "-" : (mb>=1024 ? (mb/1024).toFixed(2)+" GB" : mb.toFixed(1)+" MB");
+}
+function esc(s){
+  return String(s??"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+async function refresh(){
+  let s;
+  try{
+    const r = await api("/api/status");
+    s = await r.json();
+  }catch(e){
+    $("errbox").textContent = "Panel API unreachable: "+e.message;
+    $("errbox").style.display = "block";
+    return;
+  }
+  const live = s.live, db = s.db;
+  const running = s.running, paused = s.paused;
+
+  const pill = $("pill");
+  pill.className = "pill " + (running ? (paused?"paused":(live.waiting?"stopped":"running")) : "stopped");
+  pill.textContent = running ? (paused?"PAUSED":(live.waiting?"WAITING":"RUNNING")) : "STOPPED";
+  $("addr").textContent = s.address;
+
+  $("cListings").textContent = fmt(db.listings);
+  $("cNew").textContent = fmt(live.fresh);
+  $("cUpdated").textContent = fmt(live.updated);
+  $("cRemoved").textContent = fmt(live.removed);
+  $("cRequests").textContent = fmt(live.requests);
+  $("cPages").textContent = fmt(live.pages);
+  $("cSeen").textContent = fmt(live.seen);
+  $("cHistory").textContent = fmt(db.history);
+  $("cErrors").textContent = fmt(live.errors);
+  $("cErrors").className = "val " + (live.errors>0 ? "red" : "");
+  $("cDbsize").textContent = fmtDB(db.size_mb);
+
+  $("iCycle").textContent = live.cycle || "-";
+  $("iStarted").textContent = live.cycle_started_at ? new Date(live.cycle_started_at).toLocaleString() : "-";
+  $("iUptime").textContent = live.cycle_started_at ? fmtDur((Date.now()-new Date(live.cycle_started_at).getTime())/1000) : "-";
+  $("iNext").textContent = running ? "after cycle end" : (live.next_cycle_at ? fmtDur((new Date(live.next_cycle_at).getTime()-Date.now())/1000) : "-");
+  $("iEta").textContent = s.eta_seconds ? fmtDur(s.eta_seconds) : "-";
+  $("iPace").textContent = s.config.sleep_min_seconds+"-"+s.config.sleep_max_seconds+"s / page";
+  $("iPageSize").textContent = s.config.page_size;
+  $("iCycleHours").textContent = s.config.cycle_hours+"h";
+  $("iCats").textContent = s.config.categories_rent+" rent + "+s.config.categories_sale+" sale";
+  $("iWindow").textContent = s.config.window_enabled
+    ? (String(s.config.window_start).padStart(2,"0")+":00-"+String(s.config.window_end).padStart(2,"0")+":00"+(s.config.in_window?" (OPEN)":""))
+    : "off (24h mode)";
+  $("iDb").textContent = db.path;
+  $("iDb").title = db.path;
+
+  $("errbox").style.display = s.last_error ? "block" : "none";
+  $("errbox").textContent = s.last_error ? "Last crawler error: "+s.last_error : "";
+
+  // category progress
+  const cats = live.categories || [];
+  $("catCount").textContent = cats.length+" categories";
+  let html = "";
+  let curGroup = "";
+  cats.forEach((c, i) => {
+    if(c.set !== curGroup){
+      curGroup = c.set;
+      html += '<div class="muted" style="margin:6px 0 2px;font-size:11px;text-transform:uppercase;letter-spacing:.5px">'+esc(c.set)+'</div>';
+    }
+    const pct = c.done ? 100 : (c.total>0 ? Math.min(100, c.from/c.total*100) : 0);
+    const state = c.errored ? "err" : (c.done ? "done" : "");
+    const active = (!s.watch && live.active_cat === i) ? ' class="cat active"' : ' class="cat"';
+    const counts = (c.done && !c.total) ? "—" : fmt(c.from)+" / "+fmt(c.total);
+    html += '<div'+active+'>'
+      + '<div class="tag">'+c.set+'/'+String(c.id).padStart(2,"0")+'</div>'
+      + '<div class="name" title="'+esc(c.name)+'">'+esc(c.name||"cat "+c.id)+'</div>'
+      + '<div class="bar"><i class="'+state+'" style="width:'+pct.toFixed(1)+'%"></i></div>'
+      + '<div class="pct">'+pct.toFixed(1)+'%</div>'
+      + '<div class="tag">'+counts+'</div>'
+      + '</div>';
+  });
+  $("cats").innerHTML = html || '<div class="muted">no categories yet</div>';
+
+  // history
+  let rows = "";
+  (s.runs||[]).forEach(r => {
+    const st = r.status==="completed" ? '<span class="ok">completed</span>'
+             : r.status==="aborted" ? '<span class="bad">aborted</span>'
+             : '<span class="warn">'+esc(r.status)+'</span>';
+    rows += '<tr><td>#'+r.cycle+'</td><td>'+st+'</td><td>'+esc(r.started_at||"")+'</td>'
+      + '<td>'+fmt(r.requests)+'</td><td>'+fmt(r.seen)+'</td><td>+'+fmt(r.fresh)+'</td>'
+      + '<td>'+fmt(r.updated)+'</td><td>'+fmt(r.removed)+'</td><td>'+fmt(r.errors)+'</td></tr>';
+  });
+  $("runs").innerHTML = rows || '<tr><td colspan="9" class="muted">no runs yet</td></tr>';
+
+  $("foot").textContent = "panel refreshed "+new Date().toLocaleTimeString()+" | heartbeat: "+
+    (s.heartbeat && s.heartbeat.last_update ? fmtDur(s.heartbeat.age_sec)+" ago" : "never")+
+    (s.heartbeat && s.heartbeat.stale ? " (STALE)" : "")+
+    (s.telegram && s.telegram.enabled ? " | telegram: "+(s.telegram.last_ok===true?"OK":(s.telegram.last_error||"no sends yet")) : "")+
+    (s.config.dry_run ? " | DRY-RUN" : "");
+}
+
+async function loadLog(){
+  try{
+    const r = await api("/api/log?lines=150");
+    const j = await r.json();
+    const box = $("logbox");
+    const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+    box.textContent = (j.lines||[]).join("\n");
+    $("logMeta").textContent = (j.lines||[]).length+" lines";
+    if(atBottom) box.scrollTop = box.scrollHeight;
+  }catch(e){}
+}
+
+async function ctrl(action){
+  const btn = action==="start" ? $("btnStart") : action==="stop" ? $("btnStop"): action==="pause" ? $("btnPause") : $("btnResume");
+  btn.disabled = true;
+  try{
+    const r = await api("/api/control", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({action})});
+    const j = await r.json();
+    $("errbox").textContent = j.ok ? "✓ "+j.message : "✗ "+j.message;
+    $("errbox").style.display = "block";
+  }catch(e){
+    $("errbox").textContent = "control failed: "+e.message;
+    $("errbox").style.display = "block";
+  }
+  btn.disabled = false;
+  setTimeout(refresh, 300);
+}
+
+refresh();
+loadLog();
+setInterval(refresh, 1000);
+setInterval(loadLog, 3000);
+</script>
+</body>
+</html>
