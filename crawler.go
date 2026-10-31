@@ -554,6 +554,11 @@ func (c *Crawler) runCycle(ctx context.Context, cycle int, groups []categoryGrou
 					if err := c.store.SaveState(ctx, CrawlState{Cycle: cycle, SetIndex: setIdx, CategoryID: catID, From: from, PageSize: c.cfg.PageSize}); err != nil {
 						c.log.Errorf("saving resume state: %v", err)
 					}
+					if pages > 0 && pages%100 == 0 {
+						if err := c.store.Checkpoint(ctx); err != nil {
+							c.log.Warnf("mid-cycle wal checkpoint: %v", err)
+						}
+					}
 				}
 
 				catPages++
@@ -664,13 +669,6 @@ func (c *Crawler) runCycle(ctx context.Context, cycle int, groups []categoryGrou
 		c.log.Warnf("cycle had %d errors; skipping removed-detection pass", cycleErrors)
 	}
 
-	// periodic WAL checkpoint keeps the sidecar file bounded
-	if !c.dryRun && pages > 0 && pages%500 == 0 {
-		if err := c.store.Checkpoint(ctx); err != nil {
-			c.log.Errorf("%v", err)
-		}
-	}
-
 	status := "completed"
 	if cycleErrors > 0 {
 		status = "aborted"
@@ -678,6 +676,11 @@ func (c *Crawler) runCycle(ctx context.Context, cycle int, groups []categoryGrou
 	if !c.dryRun {
 		if err := c.store.FinishRun(ctx, runID, status, requests, pages, totalSeen, totalNew, totalUpdated, removed, cycleErrors, lastErr); err != nil {
 			c.log.Errorf("finishing run row: %v", err)
+		}
+		if pages > 0 {
+			if err := c.store.Checkpoint(ctx); err != nil {
+				c.log.Warnf("end-of-cycle wal checkpoint: %v", err)
+			}
 		}
 	}
 	if c.Stats != nil {

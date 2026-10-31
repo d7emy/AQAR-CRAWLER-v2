@@ -57,6 +57,20 @@ var flateWriterPool = sync.Pool{
 	},
 }
 
+var flateReaderPool = sync.Pool{
+	New: func() any {
+		return flate.NewReaderDict(bytes.NewReader(nil), aqarFlateDict)
+	},
+}
+
+var byteBufPool = sync.Pool{
+	New: func() any {
+		b := new(bytes.Buffer)
+		b.Grow(8192)
+		return b
+	},
+}
+
 // CompressJSON compresses a raw JSON byte slice using DEFLATE with aqarFlateDict
 // and prefixes it with the 4-byte "AQZ1" magic header.
 // It is 100% lossless: DecompressJSON restores the exact input byte-for-byte.
@@ -67,18 +81,19 @@ func CompressJSON(raw []byte) []byte {
 	if IsCompressedJSON(raw) {
 		return raw
 	}
-	var buf bytes.Buffer
-	buf.Grow(len(raw)/5 + 64)
+	buf := byteBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
 	buf.Write(aqz1Magic)
 
 	w := flateWriterPool.Get().(*flate.Writer)
-	w.Reset(&buf)
+	w.Reset(buf)
 	_, _ = w.Write(raw)
 	_ = w.Close()
 	flateWriterPool.Put(w)
 
 	out := make([]byte, buf.Len())
 	copy(out, buf.Bytes())
+	byteBufPool.Put(buf)
 	return out
 }
 
@@ -86,6 +101,33 @@ func CompressJSON(raw []byte) []byte {
 func IsCompressedJSON(data []byte) bool {
 	return len(data) >= 4 &&
 		data[0] == 'A' && data[1] == 'Q' && data[2] == 'Z' && data[3] == '1'
+}
+
+// DecompressJSONBytes transparently decompresses an AQZ1 blob into a byte slice
+// or returns plain-text JSON bytes unchanged if it is not compressed.
+func DecompressJSONBytes(data []byte) ([]byte, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+	if !IsCompressedJSON(data) {
+		return data, nil
+	}
+	r := flateReaderPool.Get().(io.ReadCloser)
+	_ = r.(flate.Resetter).Reset(bytes.NewReader(data[4:]), aqarFlateDict)
+
+	buf := byteBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	_, err := buf.ReadFrom(r)
+	_ = r.Close()
+	flateReaderPool.Put(r)
+	if err != nil {
+		byteBufPool.Put(buf)
+		return nil, fmt.Errorf("decompress AQZ1 json: %w", err)
+	}
+	out := make([]byte, buf.Len())
+	copy(out, buf.Bytes())
+	byteBufPool.Put(buf)
+	return out, nil
 }
 
 // DecompressJSON transparently decompresses an AQZ1 blob or returns plain-text
@@ -97,13 +139,21 @@ func DecompressJSON(data []byte) (string, error) {
 	if !IsCompressedJSON(data) {
 		return string(data), nil
 	}
-	r := flate.NewReaderDict(bytes.NewReader(data[4:]), aqarFlateDict)
-	defer r.Close()
-	out, err := io.ReadAll(r)
+	r := flateReaderPool.Get().(io.ReadCloser)
+	_ = r.(flate.Resetter).Reset(bytes.NewReader(data[4:]), aqarFlateDict)
+
+	buf := byteBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	_, err := buf.ReadFrom(r)
+	_ = r.Close()
+	flateReaderPool.Put(r)
 	if err != nil {
+		byteBufPool.Put(buf)
 		return "", fmt.Errorf("decompress AQZ1 json: %w", err)
 	}
-	return string(out), nil
+	s := buf.String()
+	byteBufPool.Put(buf)
+	return s, nil
 }
 
 // CanonicalContentHash computes the noise-resistant SHA-256 content hash of a

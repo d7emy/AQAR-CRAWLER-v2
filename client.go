@@ -44,9 +44,10 @@ type Client struct {
 // working when Cloudflare blocks the machine's direct IP.
 func buildTransport(cfg Config) (*http.Transport, error) {
 	tr := &http.Transport{
-		MaxIdleConns:        4,
+		MaxIdleConns:        8,
 		MaxIdleConnsPerHost: 4,
-		IdleConnTimeout:     60 * time.Second,
+		IdleConnTimeout:     120 * time.Second,
+		ForceAttemptHTTP2:   true,
 	}
 	if cfg.ProxyURL == "" {
 		return tr, nil
@@ -96,9 +97,10 @@ func NewClient(cfg Config, log *Logger) *Client {
 		directHC = &http.Client{
 			Timeout: 90 * time.Second,
 			Transport: &http.Transport{
-				MaxIdleConns:        4,
+				MaxIdleConns:        8,
 				MaxIdleConnsPerHost: 4,
-				IdleConnTimeout:     60 * time.Second,
+				IdleConnTimeout:     120 * time.Second,
+				ForceAttemptHTTP2:   true,
 			},
 		}
 	}
