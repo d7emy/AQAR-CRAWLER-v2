@@ -67,3 +67,23 @@ go build -o aqar-crawler.exe .
 
 ### Configuration
 On first run, `config.json` is generated automatically (see [`config.example.json`](config.example.json)).
+
+
+---
+
+## Zero-Downtime Self-Update & Remote CLI
+
+When running via `run.bat`, `run.ps1`, or `run.sh`, the server automatically polls `origin/main` every 2 minutes and exposes `POST /api/update`:
+- **Plan A (`hot_reload`)**: Reloads configuration/non-code updates in `<5ms` with `0ms` downtime.
+- **Plan B (`binary_handoff`)**: Compiles `aqar-crawler.new.exe` in the background while crawling continues, runs `-self-test`, swaps binaries, checkpoints mid-cycle state, and restarts in `<1s` via exit code `42`.
+
+```powershell
+# Remote status check
+.\aqar-crawler.exe -remote 192.168.0.137:9090 -remote-cmd status
+
+# Trigger immediate Git pull & update
+.\aqar-crawler.exe -remote 192.168.0.137:9090 -remote-cmd update
+
+# Tail remote logs
+.\aqar-crawler.exe -remote 192.168.0.137:9090 -remote-cmd log
+```
