@@ -292,75 +292,76 @@ func (s *Store) IngestPage(ctx context.Context, _ int64, cycle int, listings []m
 
 	// Step 3: Fetch current hash & refresh for these ids (chunked to stay well
 	// below SQLite's host parameter limit regardless of page_size).
-	type curState struct {
-		hash    string
-		refresh int64
-	}
-	current := make(map[int64]curState, len(ids))
-	const queryChunk = 450
-	for start := 0; start < len(ids); start += queryChunk {
-		chunk := ids[start:min(len(ids), start+queryChunk)]
-		placeholders := strings.TrimRight(strings.Repeat("?,", len(chunk)), ",")
-		args := make([]any, len(chunk))
-		for i, id := range chunk {
-			args[i] = id
+		type curState struct {
+			hash     string
+			refresh  int64
+			whatsapp int64
 		}
-		rows, err := s.db.QueryContext(ctx,
-			"SELECT id, data_hash, COALESCE(refresh, 0) FROM listings WHERE id IN ("+placeholders+")",
-			args...)
-		if err != nil {
-			return IngestionStats{}, fmt.Errorf("querying current hashes: %w", err)
-		}
-		for rows.Next() {
-			var id, ref int64
-			var h string
-			if err := rows.Scan(&id, &h, &ref); err != nil {
-				rows.Close()
-				return IngestionStats{}, fmt.Errorf("scan hash row: %w", err)
+		current := make(map[int64]curState, len(ids))
+		const queryChunk = 450
+		for start := 0; start < len(ids); start += queryChunk {
+			chunk := ids[start:min(len(ids), start+queryChunk)]
+			placeholders := strings.TrimRight(strings.Repeat("?,", len(chunk)), ",")
+			args := make([]any, len(chunk))
+			for i, id := range chunk {
+				args[i] = id
 			}
-			current[id] = curState{hash: h, refresh: ref}
-		}
-		if err := rows.Err(); err != nil {
+			rows, err := s.db.QueryContext(ctx,
+				"SELECT id, data_hash, COALESCE(refresh, 0), COALESCE(whatsapp_count, 0) FROM listings WHERE id IN ("+placeholders+")",
+				args...)
+			if err != nil {
+				return IngestionStats{}, fmt.Errorf("querying current hashes: %w", err)
+			}
+			for rows.Next() {
+				var id, ref, wa int64
+				var h string
+				if err := rows.Scan(&id, &h, &ref, &wa); err != nil {
+					rows.Close()
+					return IngestionStats{}, fmt.Errorf("scan hash row: %w", err)
+				}
+				current[id] = curState{hash: h, refresh: ref, whatsapp: wa}
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				return IngestionStats{}, fmt.Errorf("iterating hash rows: %w", err)
+			}
 			rows.Close()
-			return IngestionStats{}, fmt.Errorf("iterating hash rows: %w", err)
 		}
-		rows.Close()
-	}
 
-	stats := IngestionStats{Seen: len(items)}
-	for i := range items {
-		cur, known := current[items[i].id]
-		if !known {
-			items[i].changeType = "new"
-			items[i].blob = CompressJSON(items[i].raw)
-			items[i].raw = nil
-			stats.New++
-			continue
-		}
-		if cur.hash != items[i].hash {
-			// Lazy fallback check against legacy raw SHA-256 (for uncompacted v1 DBs)
-			rawSum := sha256.Sum256(items[i].raw)
-			rawHash := hex.EncodeToString(rawSum[:])
-			if cur.hash != rawHash {
-				items[i].changeType = "update"
+		stats := IngestionStats{Seen: len(items)}
+		for i := range items {
+			cur, known := current[items[i].id]
+			if !known {
+				items[i].changeType = "new"
 				items[i].blob = CompressJSON(items[i].raw)
 				items[i].raw = nil
-				stats.Updated++
+				stats.New++
 				continue
 			}
-			// Legacy hash matched -> migrate hash & compressed blob in-place without history row
-			items[i].changeType = "touch_blob"
-			items[i].blob = CompressJSON(items[i].raw)
-			items[i].raw = nil
-			continue
-		}
-		if cur.refresh != items[i].refresh {
-			// Substantive content unchanged, but refresh timestamp bumped -> update blob & refresh in-place
-			items[i].changeType = "touch_blob"
-			items[i].blob = CompressJSON(items[i].raw)
-			items[i].raw = nil
-			continue
-		}
+			if cur.hash != items[i].hash {
+				// Lazy fallback check against legacy raw SHA-256 (for uncompacted v1 DBs)
+				rawSum := sha256.Sum256(items[i].raw)
+				rawHash := hex.EncodeToString(rawSum[:])
+				if cur.hash != rawHash {
+					items[i].changeType = "update"
+					items[i].blob = CompressJSON(items[i].raw)
+					items[i].raw = nil
+					stats.Updated++
+					continue
+				}
+				// Legacy hash matched -> migrate hash & compressed blob in-place without history row
+				items[i].changeType = "touch_blob"
+				items[i].blob = CompressJSON(items[i].raw)
+				items[i].raw = nil
+				continue
+			}
+			if cur.refresh != items[i].refresh || cur.whatsapp != items[i].whatsapp {
+				// Substantive content unchanged, but refresh or whatsapp lead count changed -> update blob in-place
+				items[i].changeType = "touch_blob"
+				items[i].blob = CompressJSON(items[i].raw)
+				items[i].raw = nil
+				continue
+			}
 		// 100% unchanged (same canonical hash and same refresh) -> metadata-only touch!
 		items[i].changeType = "touch_meta"
 		items[i].raw = nil
