@@ -75,7 +75,7 @@ const defaultConfigJSON = `{
   "removed_grace_cycles": 2,
   "telegram_enabled": false,
   "telegram_bot_token": "",
-  "telegram_chat_id": "707245842",
+  "telegram_chat_id": "",
   "telegram_heartbeat_alert_minutes": 30,
   "url_enrichment_enabled": true,
   "auto_update_enabled": true,
