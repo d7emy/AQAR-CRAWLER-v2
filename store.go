@@ -80,6 +80,7 @@ func (s *Store) Close() error {
 	if s.ro != nil && s.ro != s.db {
 		_ = s.ro.Close()
 	}
+	_, _ = s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 	return s.db.Close()
 }
 

@@ -164,9 +164,11 @@ func main() {
 	if *radarFlag {
 		rctx, rcancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer rcancel()
+		_ = store.Checkpoint(rctx)
 		an, err := store.ArchiveAnalytics(rctx)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Analytics failed: %v\n", err)
+			_ = store.Close()
 			os.Exit(1)
 		}
 		fmt.Printf("=== AQAR Archive Analytics (%s | %.1f MB) ===\n", cfg.DBPath, store.DBSizeMB())
@@ -179,6 +181,7 @@ func main() {
 			fmt.Printf("  #%d [%s] %.0f -> %.0f SAR (%.1f%%) | %s | %s\n",
 				d.ID, d.CategoryName, d.OldPrice, d.NewPrice, d.PricePct, d.ChangedAt, d.Title)
 		}
+		_ = store.Close()
 		os.Exit(0)
 	}
 
