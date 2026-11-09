@@ -1139,6 +1139,7 @@ let autoInspectedOnce = false;
 let catFilterMode = "all";
 let lastLiveCategories = [];
 let lastActiveCatIdx = -1;
+let lastSeenCommit = "";
 
 // Theme Persistence (Default: Light "Warm Newsprint" Broadsheet)
 (function initTheme(){
@@ -1259,6 +1260,13 @@ async function refresh(){
 
   if(s.update){
     const u = s.update;
+    if(u.current_commit){
+      if(lastSeenCommit && lastSeenCommit !== u.current_commit){
+        window.location.reload();
+        return;
+      }
+      lastSeenCommit = u.current_commit;
+    }
     $("commitPill").textContent = u.current_commit ? ("@" + u.current_commit) : "@local";
     let utxt = "CI/CD: " + (u.up_to_date ? "up to date" : "update ready");
     if(u.last_mode && u.last_mode !== "none"){
@@ -1691,6 +1699,7 @@ async function triggerUpdate(){
       $("errbox").textContent = "✕ Update failed: " + j.last_error;
     } else if(j.restart_pending){
       $("errbox").textContent = "✓ Binary compiled (" + j.build_duration_ms + "ms) — executing <1s hot handoff to @" + j.current_commit + "...";
+      setTimeout(() => window.location.reload(), 1200);
     } else {
       $("errbox").textContent = "✓ Update check complete: mode=" + (j.last_mode || "none") + " @" + (j.current_commit || "");
     }
