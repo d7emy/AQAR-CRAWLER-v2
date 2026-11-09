@@ -469,6 +469,9 @@ func (c *Crawler) runCycle(ctx context.Context, cycle int, groups []categoryGrou
 
 			// count
 			pace()
+			if ctx.Err() != nil {
+				break
+			}
 			total, err := c.client.Count(ctx, catID)
 			requests++
 			if err != nil {
@@ -508,6 +511,9 @@ func (c *Crawler) runCycle(ctx context.Context, cycle int, groups []categoryGrou
 			catPageCount := int(math.Ceil(float64(total) / float64(c.cfg.PageSize)))
 			for from < total && ctx.Err() == nil {
 				pace()
+				if ctx.Err() != nil {
+					break
+				}
 				page, err := c.client.FindPage(ctx, catID, from, c.cfg.PageSize)
 				requests++
 				if err != nil {
@@ -558,12 +564,17 @@ func (c *Crawler) runCycle(ctx context.Context, cycle int, groups []categoryGrou
 					cycleSeen[id] = struct{}{}
 				}
 
+				// Use a detached context for DB ingestion + resume checkpointing so a
+				// Ctrl+C signal arriving mid-write never splits page ingestion from
+				// its corresponding resume state update.
+				wctx, wcancel := context.WithTimeout(context.Background(), 15*time.Second)
 				if c.dryRun {
 					totalSeen += len(merged)
 					totalNew += len(merged)
 				} else {
-					stats, err := c.store.IngestPage(ctx, runID, cycle, merged)
+					stats, err := c.store.IngestPage(wctx, runID, cycle, merged)
 					if err != nil {
+						wcancel()
 						cycleErrors++
 						lastErr = fmt.Sprintf("store cat %d from %d: %v", catID, from, err)
 						c.log.Errorf("%s", lastErr)
@@ -580,14 +591,14 @@ func (c *Crawler) runCycle(ctx context.Context, cycle int, groups []categoryGrou
 
 				nextFrom := from + len(page.Listings)
 				if !c.dryRun {
-					if err := c.store.SaveState(ctx, CrawlState{Cycle: cycle, SetIndex: setIdx, CategoryID: catID, From: nextFrom, PageSize: c.cfg.PageSize}); err != nil {
+					if err := c.store.SaveState(wctx, CrawlState{Cycle: cycle, SetIndex: setIdx, CategoryID: catID, From: nextFrom, PageSize: c.cfg.PageSize}); err != nil {
 						c.log.Errorf("saving resume state: %v", err)
 					}
 					var snap LiveStats
 					if c.Stats != nil {
 						snap = c.Stats.Snapshot()
 					}
-					_ = c.store.SaveSessionCheckpoint(ctx, c.cfg.StateDir, SessionCheckpoint{
+					_ = c.store.SaveSessionCheckpoint(wctx, c.cfg.StateDir, SessionCheckpoint{
 						RunID:           runID,
 						Cycle:           cycle,
 						CycleStartedAt:  snap.CycleStartedAt,
@@ -608,11 +619,12 @@ func (c *Crawler) runCycle(ctx context.Context, cycle int, groups []categoryGrou
 						Reason:          "page_checkpoint",
 					})
 					if pages > 0 && pages%100 == 0 {
-						if err := c.store.Checkpoint(ctx); err != nil {
+						if err := c.store.Checkpoint(wctx); err != nil {
 							c.log.Warnf("mid-cycle wal checkpoint: %v", err)
 						}
 					}
 				}
+				wcancel()
 
 				catPages++
 				pct := float64(from) / float64(total) * 100
