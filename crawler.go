@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 )
 
@@ -166,15 +167,47 @@ func (c *Crawler) Run(ctx context.Context) error {
 	}
 
 	nextCycle := 1
+	resumingMidCycle := false
 	if st, ok, err := c.store.LoadState(ctx); err != nil {
 		return fmt.Errorf("loading crawl state: %w", err)
 	} else if ok && st.Cycle > 0 {
 		nextCycle = st.Cycle
+		resumingMidCycle = true
 		c.log.Infof("found interrupted cycle %d; will resume", st.Cycle)
 	} else if n, ok, err := c.store.LoadNextCycle(ctx); err != nil {
 		return fmt.Errorf("loading next cycle: %w", err)
 	} else if ok && n > 0 {
 		nextCycle = n
+	}
+
+	// If a zero-downtime hot-swap or restart occurred while sleeping between
+	// cycles, resume the remaining wait until NextCycleAt instead of starting
+	// the next cycle prematurely.
+	if !resumingMidCycle && !c.Once {
+		if prevLive, _, lok, _ := c.store.LoadLiveStats(ctx); lok && prevLive.NextCycleAt != "" {
+			if nextAt, perr := time.Parse(time.RFC3339, prevLive.NextCycleAt); perr == nil {
+				if wait := time.Until(nextAt); wait > 0 {
+					errs := prevLive.Errors
+					if errs == 1 && strings.Contains(prevLive.LastError, "REFUSING removed-detection pass") {
+						errs = 0
+					}
+					if c.Stats != nil {
+						c.Stats.RestoreCycle(prevLive.Cycle, prevLive.CycleStartedAt, prevLive.Requests, prevLive.Pages, prevLive.Seen, prevLive.Fresh, prevLive.Updated, errs, prevLive.ActiveCat, prevLive.Categories)
+						c.Stats.FinishCycle(nextAt)
+						c.Stats.SetWaiting(true)
+						c.saveLive(ctx)
+					}
+					c.log.Infof("resuming inter-cycle wait after cycle %d; next cycle in %v (at %s)",
+						prevLive.Cycle, wait.Round(time.Minute), nextAt.Local().Format("2006-01-02 15:04:05"))
+					if !c.waitWithHeartbeat(ctx, wait) {
+						return nil
+					}
+					if c.Stats != nil {
+						c.Stats.SetWaiting(false)
+					}
+				}
+			}
+		}
 	}
 
 	for {
@@ -265,9 +298,6 @@ func (c *Crawler) Run(ctx context.Context) error {
 			c.saveLive(ctx)
 		}
 		if !c.waitWithHeartbeat(ctx, wait) {
-			if c.Stats != nil {
-				c.Stats.SetWaiting(false)
-			}
 			return nil
 		}
 		if c.Stats != nil {
@@ -746,9 +776,13 @@ func (c *Crawler) runCycle(ctx context.Context, cycle int, groups []categoryGrou
 			c.log.Infof("dry-run: skipping removed-detection pass")
 		} else {
 			activeCount, aerr := c.store.DBActiveListingsCount(ctx)
-			if aerr == nil && len(cats) >= 20 && activeCount >= 1000 && int64(len(cycleSeen)) < activeCount/2 {
+			uniqueSeen := int64(len(cycleSeen))
+			if dbSeen, derr := c.store.DBSeenInCycleCount(ctx, cycle); derr == nil && dbSeen > uniqueSeen {
+				uniqueSeen = dbSeen
+			}
+			if aerr == nil && len(cats) >= 20 && activeCount >= 1000 && uniqueSeen < activeCount/2 {
 				cycleErrors++
-				lastErr = fmt.Sprintf("cycle %d saw only %d unique listings vs %d active in archive (<50%%); REFUSING removed-detection pass", cycle, len(cycleSeen), activeCount)
+				lastErr = fmt.Sprintf("cycle %d saw only %d unique listings vs %d active in archive (<50%%); REFUSING removed-detection pass", cycle, uniqueSeen, activeCount)
 				c.log.Errorf("%s", lastErr)
 			} else {
 				removed, err = c.store.MarkRemovedWithGrace(ctx, cycle, max(1, c.cfg.RemovedGraceCycles))

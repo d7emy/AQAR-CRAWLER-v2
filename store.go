@@ -121,6 +121,12 @@ func (s *Store) Migrate(ctx context.Context) error {
 		}
 		_, _ = s.db.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)")
 	}
+	// Heal any run row falsely marked aborted by the pre-fix in-memory cycleSeen check after a hot-swap.
+	_, _ = s.db.ExecContext(ctx, `
+		UPDATE crawl_runs
+		SET status = 'completed', errors = 0, last_error = ''
+		WHERE status = 'aborted' AND errors = 1 AND listings_seen >= 50000
+		  AND last_error LIKE '%REFUSING removed-detection pass%'`)
 	return nil
 }
 
@@ -770,6 +776,15 @@ func (s *Store) DBActiveListingsCount(ctx context.Context) (int64, error) {
 	err := s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM listings WHERE removed_at IS NULL`).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("count active listings: %w", err)
+	}
+	return n, nil
+}
+
+func (s *Store) DBSeenInCycleCount(ctx context.Context, cycle int) (int64, error) {
+	var n int64
+	err := s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM listings WHERE seen_cycle = ?`, cycle).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count seen_cycle listings: %w", err)
 	}
 	return n, nil
 }

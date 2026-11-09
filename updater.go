@@ -55,9 +55,10 @@ type AutoUpdater struct {
 	branch          string
 	pollInterval    time.Duration
 	status          UpdateStatus
-	log             *Logger
-	onHotReload     func() error
-	onBinaryHandoff func(newCommit string)
+	log                   *Logger
+	onHotReload           func() error
+	onBinaryHandoff       func(newCommit string)
+	consecutiveFetchFails int
 }
 
 func NewAutoUpdater(
@@ -257,7 +258,21 @@ func (u *AutoUpdater) CheckAndApply(force bool) UpdateStatus {
 
 	// 1. Fetch remote branch
 	if out, err := u.runGit(60*time.Second, "fetch", "origin", u.branch, "--quiet"); err != nil {
-		return finishWithErr(fmt.Sprintf("git fetch failed: %v (%s)", err, strings.TrimSpace(out)))
+		u.mu.Lock()
+		u.consecutiveFetchFails++
+		fails := u.consecutiveFetchFails
+		u.status.InProgress = false
+		if force {
+			u.status.LastError = fmt.Sprintf("git fetch failed: %v (%s)", err, strings.TrimSpace(out))
+			u.status.LastMode = "failed"
+		}
+		u.saveStatusLocked()
+		st := u.status
+		u.mu.Unlock()
+		if u.log != nil && (force || fails >= 3) {
+			u.log.Warnf("[AUTO-UPDATE] git fetch failed (attempt %d): %v (%s)", fails, err, strings.TrimSpace(out))
+		}
+		return st
 	}
 
 	localSHA := u.gitRevParse("HEAD")
@@ -267,8 +282,18 @@ func (u *AutoUpdater) CheckAndApply(force bool) UpdateStatus {
 	}
 
 	u.mu.Lock()
+	u.consecutiveFetchFails = 0
 	u.status.CurrentCommit = localSHA
 	u.status.RemoteCommit = remoteSHA
+	if u.status.LastMode == "failed" {
+		if u.status.TotalBinarySwaps > 0 {
+			u.status.LastMode = "binary_handoff"
+		} else if u.status.TotalHotReloads > 0 {
+			u.status.LastMode = "hot_reload"
+		} else {
+			u.status.LastMode = "none"
+		}
+	}
 	u.mu.Unlock()
 
 	// Already up to date and not forced
