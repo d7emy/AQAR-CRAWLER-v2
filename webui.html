@@ -107,8 +107,13 @@
   }
 
   .broadsheet {
-    max-width: 1440px;
+    max-width: 1480px;
     margin: 0 auto;
+    width: 100%;
+    overflow-x: hidden;
+  }
+  body {
+    overflow-x: hidden;
   }
 
   /* Typography & Numeric Utilities */
@@ -448,10 +453,14 @@
      ========================================================================== */
   .workspace-grid {
     display: grid;
-    grid-template-columns: 1.35fr 1fr;
+    grid-template-columns: 1.05fr 0.95fr;
     gap: var(--space-6);
-    align-items: start;
+    align-items: stretch;
     margin-bottom: var(--space-6);
+  }
+  .workspace-grid > *,
+  .front-ledger > * {
+    min-width: 0;
   }
 
   .section-block {
@@ -461,6 +470,8 @@
     border-right: 1px solid var(--chronicle-rule);
     border-bottom: 1px solid var(--chronicle-rule);
     margin-bottom: var(--space-6);
+    min-width: 0;
+    overflow: hidden;
   }
   .section-head {
     display: flex;
@@ -1002,10 +1013,10 @@
       </section>
     </div>
 
-    <!-- RIGHT COLUMN: PROPERTY MONOGRAPH + CATEGORY HORIZON -->
+    <!-- RIGHT COLUMN: PROPERTY MONOGRAPH -->
     <div>
       <!-- 115-Field Cadastral Monograph -->
-      <section class="section-block" id="monographSection">
+      <section class="section-block" id="monographSection" style="margin-bottom:0;height:100%">
         <div class="section-head">
           <div>
             <div class="kicker">Dispatch 02 · Single-Parcel Deep Inspection</div>
@@ -1024,38 +1035,40 @@
           <div id="inspectJsonBox" class="press-well" style="display:none;margin-top:12px" dir="ltr"></div>
         </div>
       </section>
-
-      <!-- Category Valuation & Liquidity Horizon -->
-      <section class="section-block" style="margin-bottom:0">
-        <div class="section-head">
-          <div>
-            <div class="kicker">Dispatch 03 · Sector Liquidity &amp; Meter Valuation</div>
-            <h2>Kingdom Category Horizon (Top 20 Sectors)</h2>
-          </div>
-          <span class="section-sub">Active vs. Absorbed + Avg SAR/m²</span>
-        </div>
-        <div class="table-wrap">
-          <table class="chronicle-table">
-            <thead>
-              <tr>
-                <th class="left">Property Sector</th>
-                <th>Active</th>
-                <th>Absorbed</th>
-                <th class="left">Supply &amp; Turnover</th>
-                <th>Avg Price (SAR)</th>
-                <th>Avg SAR/m²</th>
-                <th>CSV</th>
-              </tr>
-            </thead>
-            <tbody id="analyticsRows">
-              <tr><td colspan="7" class="left" style="color:var(--chronicle-sandstone)">Computing sector valuations...</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
     </div>
 
   </div>
+
+  <!-- ========================================================================
+       SECTION III: CATEGORY VALUATION & LIQUIDITY HORIZON
+       ======================================================================== -->
+  <section class="section-block">
+    <div class="section-head">
+      <div>
+        <div class="kicker">Dispatch 03 · Sector Liquidity &amp; Meter Valuation</div>
+        <h2>Kingdom Category Horizon (Top 20 Sectors)</h2>
+      </div>
+      <span class="section-sub">Active Inventory vs. Absorbed (Removed) + Logarithmic Avg SAR/m² Scale</span>
+    </div>
+    <div class="table-wrap">
+      <table class="chronicle-table">
+        <thead>
+          <tr>
+            <th class="left">Property Sector</th>
+            <th>Active</th>
+            <th>Absorbed</th>
+            <th class="left">Supply &amp; Turnover</th>
+            <th>Avg Price (SAR)</th>
+            <th>Avg SAR/m²</th>
+            <th>CSV</th>
+          </tr>
+        </thead>
+        <tbody id="analyticsRows">
+          <tr><td colspan="7" class="left" style="color:var(--chronicle-sandstone)">Computing sector valuations...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
 
   <!-- ========================================================================
        SECTION IV: 57-CATEGORY CADASTRAL SWEEP MATRIX
@@ -1233,6 +1246,13 @@ async function refresh(){
   $("pillText").textContent = running ? (paused ? "PAUSED" : (live.waiting ? "WINDOW WAIT" : "LIVE SWEEP")) : "STOPPED";
   $("addr").textContent = s.address || "";
 
+  // Dynamically toggle crawler action buttons based on live state
+  $("btnPause").style.display = (running && !paused) ? "inline-flex" : "none";
+  $("btnResume").style.display = (running && paused) ? "inline-flex" : "none";
+  $("btnResume").className = (running && paused) ? "btn accent" : "btn";
+  $("btnStop").style.display = running ? "inline-flex" : "none";
+  $("btnStart").style.display = !running ? "inline-flex" : "none";
+
   $("cListings").textContent = fmt(db.listings);
   $("cNew").textContent = "+" + fmt(live.fresh);
   $("cUpdated").textContent = fmt(live.updated);
@@ -1396,13 +1416,14 @@ async function loadAnalytics(){
       $("analyticsRows").innerHTML = '<tr><td colspan="7" class="left" style="color:var(--chronicle-sandstone)">No category analytics available yet.</td></tr>';
       return;
     }
-    const maxMeter = Math.max(1, ...cats.map(c => c.avg_meter || 0));
+    const maxMeter = Math.max(10, ...cats.map(c => c.avg_meter || 0));
+    const logMaxMeter = Math.log10(maxMeter);
     let h = "";
     cats.forEach(c => {
       const sumCat = Math.max(1, (c.active || 0) + (c.removed || 0));
       const actShare = ((c.active || 0) / sumCat) * 100;
       const turnoverPct = ((c.removed || 0) / sumCat) * 100;
-      const meterPct = Math.min(100, ((c.avg_meter || 0) / maxMeter) * 100);
+      const meterPct = c.avg_meter > 1 ? Math.min(100, (Math.log10(c.avg_meter) / logMaxMeter) * 100) : 0;
       h += '<tr>'
         + '<td class="left"><b>'+esc(c.category_name || ("Sector #"+c.category_id))+'</b> <span class="num" style="color:var(--chronicle-sandstone);font-size:11px">#'+c.category_id+'</span></td>'
         + '<td class="num">'+fmt(c.active)+'</td>'
@@ -1593,6 +1614,9 @@ async function inspectListing(scrollIfMobile){
     if(parsed.car_entrance) pills.push('<span class="tag-pill">Car Entrance (مدخل سيارة)</span>');
     if(parsed.ac) pills.push('<span class="tag-pill">Central/Split AC</span>');
 
+    const titleStr = sum.title || parsed.title || parsed.user_title || ((sum.category_name || "Property") + " — " + (sum.address || parsed.address || ("#" + sum.id)));
+    const contentSnippet = parsed.content ? String(parsed.content).trim().replace(/\s+/g, " ").slice(0, 180) : "";
+
     let h = '<div class="monograph-header">'
       + '<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">'
       +   '<span class="kicker">Parcel Monograph #' + sum.id + ' · ' + esc(sum.category_name || ("Sector " + sum.category)) + '</span>'
@@ -1602,8 +1626,9 @@ async function inspectListing(scrollIfMobile){
       +     (sum.url ? ' · <a class="editorial-link" href="'+esc(sum.url)+'" target="_blank">Open on aqar.fm ↗</a>' : '')
       +   '</span>'
       + '</div>'
-      + '<div class="monograph-title-ar" dir="auto">' + esc(sum.title || parsed.title || parsed.user_title || ("Listing #" + sum.id)) + '</div>'
-      + '<div class="monograph-addr-ar" dir="auto">' + esc(sum.address || parsed.address || "Kingdom of Saudi Arabia") + '</div>'
+      + '<div class="monograph-title-ar"><span dir="auto">' + esc(titleStr) + '</span></div>'
+      + '<div class="monograph-addr-ar"><span dir="auto">' + esc(sum.address || parsed.address || "Kingdom of Saudi Arabia") + '</span></div>'
+      + (contentSnippet ? '<div style="margin-top:6px;padding-top:6px;border-top:1px dashed var(--chronicle-rule);font-size:12px;color:var(--chronicle-walnut);line-height:1.45"><span dir="auto">' + esc(contentSnippet) + (parsed.content.length > 180 ? "…" : "") + '</span></div>' : '')
       + '</div>';
 
     h += '<div class="spec-grid">'
@@ -1615,12 +1640,22 @@ async function inspectListing(scrollIfMobile){
       + '<div class="spec-cell"><div class="lbl">Street Width &amp; Age</div><div class="val">' + esc(streetWidth) + ' · ' + esc(propAge) + '</div></div>'
       + '<div class="spec-cell"><div class="lbl">Beds / Rooms / Baths</div><div class="val">' + (sum.beds||0) + ' bd · ' + (sum.rooms||0) + ' rm · ' + (parsed.wc||0) + ' wc</div></div>'
       + '<div class="spec-cell"><div class="lbl">WhatsApp Lead Velocity</div><div class="val">' + fmt(whatsappLeads) + ' inquiries</div></div>'
-      + '<div class="spec-cell"><div class="lbl">Broker / Advertiser</div><div class="val" dir="auto" style="font-family:var(--font-sans);font-size:12.5px">' + esc(user.name || "Direct Owner") + '</div></div>'
+      + '<div class="spec-cell"><div class="lbl">Broker / Advertiser</div><div class="val" style="font-family:var(--font-sans);font-size:12.5px"><span dir="auto">' + esc(user.name || "Direct Owner") + '</span></div></div>'
       + '</div>';
 
     if(pills.length){
       h += '<div class="amenity-tags">' + pills.join("") + '</div>';
     }
+
+    const fmtDiffVal = (v) => {
+      if(v === null || v === undefined) return "null";
+      if(Array.isArray(v)) return "[" + v.length + " items]";
+      if(typeof v === "object") return "{" + Object.keys(v).length + " fields}";
+      if(typeof v === "number") return fmt(v);
+      const s = String(v);
+      return s.length > 44 ? s.slice(0, 44) + "…" : s;
+    };
+    const priorityOrder = {price: 1, meter_price: 2, area: 3, category: 4, title: 5, content: 6, beds: 7, rooms: 8};
 
     h += '<div class="kicker" style="margin-bottom:6px">Chronological Version Diff Essay (' + (j.rows||[]).length + ' snapshots)</div>';
     h += '<div class="table-wrap"><table class="chronicle-table"><thead><tr><th class="left">Recorded UTC</th><th class="left">Event</th><th class="left">Field-Level Revisions (Before → After)</th></tr></thead><tbody>';
@@ -1629,12 +1664,16 @@ async function inspectListing(scrollIfMobile){
       if(rw.change_type === "removed"){
         dstr = '<span style="color:var(--chronicle-crimson)">Listing absent past grace period — marked removed</span>';
       } else if(rw.diff && rw.diff.length){
-        dstr = rw.diff.map(d => '<b>'+esc(d.field)+'</b>: <span style="color:var(--chronicle-sandstone)">'+esc(JSON.stringify(d.from))+'</span> → <span style="color:var(--chronicle-cobalt);font-weight:700">'+esc(JSON.stringify(d.to))+'</span>').join(" &nbsp;·&nbsp; ");
+        const sorted = [...rw.diff].sort((a, b) => (priorityOrder[a.field]||99) - (priorityOrder[b.field]||99));
+        const shown = sorted.slice(0, 6);
+        const extra = sorted.length - shown.length;
+        dstr = shown.map(d => '<b>'+esc(d.field)+'</b>: <span style="color:var(--chronicle-sandstone)">'+esc(fmtDiffVal(d.from))+'</span> → <span style="color:var(--chronicle-cobalt);font-weight:700">'+esc(fmtDiffVal(d.to))+'</span>').join(" &nbsp;·&nbsp; ")
+          + (extra > 0 ? ' &nbsp;<span class="tag-pill">+' + extra + ' media/meta fields</span>' : '');
       }
       h += '<tr>'
         + '<td class="left num" style="font-size:11.5px">'+esc((rw.fetched_at||"").slice(0,19).replace("T"," "))+'</td>'
         + '<td class="left"><span class="tag-pill">'+esc(rw.change_type)+'</span></td>'
-        + '<td class="left" style="white-space:normal">'+dstr+'</td>'
+        + '<td class="left" style="white-space:normal;word-break:break-word;overflow-wrap:anywhere">'+dstr+'</td>'
         + '</tr>';
     });
     h += '</tbody></table></div>';
