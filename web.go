@@ -23,18 +23,21 @@ var webuiHTML []byte
 
 // apiStatus is the JSON payload served by GET /api/status.
 type apiStatus struct {
-	Live       LiveStats     `json:"live"`
-	Running    bool          `json:"running"`
-	Paused     bool          `json:"paused"`
-	LastError  string        `json:"last_error"`
-	Runs       []RunSummary  `json:"runs"`
-	DB         apiStatusDB   `json:"db"`
-	Config     apiStatusCfg  `json:"config"`
-	Telegram   apiTelegram   `json:"telegram"`
-	Heartbeat  apiHeartbeat  `json:"heartbeat"`
-	UptimeSec  int64         `json:"uptime_sec"`
-	ETASeconds int64         `json:"eta_seconds"`
-	Address    string        `json:"address"`
+	Live             LiveStats     `json:"live"`
+	Running          bool          `json:"running"`
+	Paused           bool          `json:"paused"`
+	LastError        string        `json:"last_error"`
+	Runs             []RunSummary  `json:"runs"`
+	DB               apiStatusDB   `json:"db"`
+	Config           apiStatusCfg  `json:"config"`
+	Telegram         apiTelegram   `json:"telegram"`
+	Heartbeat        apiHeartbeat  `json:"heartbeat"`
+	Update           UpdateStatus  `json:"update"`
+	UptimeSec        int64         `json:"uptime_sec"`
+	ProcessUptimeSec int64         `json:"process_uptime_sec"`
+	RestartsCount    int           `json:"restarts_count"`
+	ETASeconds       int64         `json:"eta_seconds"`
+	Address          string        `json:"address"`
 }
 
 type apiStatusDB struct {
@@ -96,6 +99,8 @@ func (w *webServer) handler() http.Handler {
 	mux.HandleFunc("/", w.handleIndex)
 	mux.HandleFunc("/api/status", w.auth(w.handleStatus))
 	mux.HandleFunc("/api/control", w.auth(w.handleControl))
+	mux.HandleFunc("/api/controls", w.auth(w.handleControl))
+	mux.HandleFunc("/api/update", w.auth(w.handleUpdate))
 	mux.HandleFunc("/api/log", w.auth(w.handleLog))
 	mux.HandleFunc("/api/listing", w.auth(w.handleListing))
 	mux.HandleFunc("/api/changes", w.auth(w.handleChanges))
@@ -130,14 +135,18 @@ func (w *webServer) handleStatus(rw http.ResponseWriter, r *http.Request) {
 
 	live := w.ctrl.Stats().Snapshot()
 	running, paused, lastErr := w.ctrl.StatusSnapshot()
+	totalUp, procUp, restarts := w.ctrl.CumulativeUptimeSec()
 
 	out := apiStatus{
-		Live:      live,
-		Running:   running,
-		Paused:    paused,
-		LastError: lastErr,
-		UptimeSec: int64(time.Since(w.start).Seconds()),
-		Address:   fmt.Sprintf("http://%s", r.Host),
+		Live:             live,
+		Running:          running,
+		Paused:           paused,
+		LastError:        lastErr,
+		Update:           w.ctrl.Updater().Status(),
+		UptimeSec:        totalUp,
+		ProcessUptimeSec: procUp,
+		RestartsCount:    restarts,
+		Address:          fmt.Sprintf("http://%s", r.Host),
 	}
 	// Prefer the crawler's exact cumulative counters over full-table COUNT(*)
 	// scans (the panel polls every second).
@@ -259,6 +268,23 @@ func (w *webServer) handleControl(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "message": msg})
+}
+
+func (w *webServer) handleUpdate(rw http.ResponseWriter, r *http.Request) {
+	if w.ctrl.Updater() == nil {
+		writeJSON(rw, http.StatusServiceUnavailable, map[string]any{"ok": false, "message": "auto-updater not initialized"})
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(rw, http.StatusOK, w.ctrl.Updater().Status())
+	case http.MethodPost:
+		force := r.URL.Query().Get("force") == "1" || r.URL.Query().Get("force") == "true"
+		st := w.ctrl.Updater().CheckAndApply(force)
+		writeJSON(rw, http.StatusOK, st)
+	default:
+		writeJSON(rw, http.StatusMethodNotAllowed, map[string]any{"ok": false, "message": "use GET or POST"})
+	}
 }
 
 // handleLog tails the crawler log file efficiently: it seeks to the last
@@ -462,10 +488,17 @@ func writeJSON(rw http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(rw).Encode(v)
 }
 
-// serveWeb runs the control panel server; blocks until ctx is cancelled.
+// serveWeb runs the control panel server; blocks until ctx is cancelled or
+// a self-update binary handoff / intentional API shutdown occurs.
 func serveWeb(ctx context.Context, cfg Config, log *Logger, store *Store, ctrl *Controller) error {
 	addr := net.JoinHostPort(cfg.WebHost, strconv.Itoa(cfg.WebPort))
 	srv := &http.Server{Addr: addr, Handler: newWebServer(cfg, log, store, ctrl).handler()}
+
+	loopCtx, loopCancel := context.WithCancel(ctx)
+	defer loopCancel()
+	if cfg.AutoUpdateEnabled && ctrl.Updater() != nil {
+		go ctrl.Updater().StartLoop(loopCtx)
+	}
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -473,11 +506,23 @@ func serveWeb(ctx context.Context, cfg Config, log *Logger, store *Store, ctrl *
 		errCh <- srv.ListenAndServe()
 	}()
 
-	select {
-	case <-ctx.Done():
+	shutdownServer := func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)
+	}
+
+	select {
+	case <-ctx.Done():
+		shutdownServer()
+		return nil
+	case newCommit := <-ctrl.handoffCh:
+		log.Infof("[AUTO-UPDATE] shutting down web server for binary handoff to %s", newCommit)
+		shutdownServer()
+		return nil
+	case <-ctrl.shutdownCh:
+		log.Infof("intentional shutdown requested via API")
+		shutdownServer()
 		return nil
 	case err := <-errCh:
 		return fmt.Errorf("web server: %w", err)

@@ -620,4 +620,146 @@ func Test_PriceRadarAndInspector(t *testing.T) {
 	}
 }
 
+// Test_SelfTestAndAtomicWrite verifies runSelfTest and writeFileAtomic.
+func Test_SelfTestAndAtomicWrite(t *testing.T) {
+	if err := runSelfTest(""); err != nil {
+		t.Fatalf("runSelfTest failed: %v", err)
+	}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "state", "test_atomic.json")
+	if err := writeFileAtomic(target, []byte(`{"ok":1}`), 0o644); err != nil {
+		t.Fatalf("writeFileAtomic initial write failed: %v", err)
+	}
+	if err := writeFileAtomic(target, []byte(`{"ok":2}`), 0o644); err != nil {
+		t.Fatalf("writeFileAtomic overwrite failed: %v", err)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil || string(got) != `{"ok":2}` {
+		t.Fatalf("unexpected atomic file content: %q (err=%v)", string(got), err)
+	}
+}
+
+// Test_SessionCheckpointMidCycleContinuity verifies that an interrupted cycle
+// (e.g. during a Plan B binary handoff) saves its in-flight counters and
+// runID, and resumes into a single unified 'completed' run without losing counts.
+func Test_SessionCheckpointMidCycleContinuity(t *testing.T) {
+	c, store, _ := newTestCrawler(t, map[int]int{1: 4, 4: 4}, func(cat, from, size int) []map[string]any {
+		if cat == 1 {
+			return genTestListings(100+from, 2)
+		}
+		return genTestListings(200+from, 2)
+	})
+	c.cfg.PageSize = 2
+	c.cfg.StateDir = t.TempDir()
+
+	// Cancel right after category 1's first page is ingested.
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	origPages := c.client
+	_ = origPages
+
+	// Simulate an interrupted run after 1 page of cat 1 (from=2)
+	runID, err := store.StartRun(ctx1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.IngestPage(ctx1, runID, 1, genTestListings(100, 2)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveState(ctx1, CrawlState{Cycle: 1, SetIndex: 0, CategoryID: 1, From: 2, PageSize: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveSessionCheckpoint(ctx1, c.cfg.StateDir, SessionCheckpoint{
+		RunID:          runID,
+		Cycle:          1,
+		CycleStartedAt: time.Now().UTC().Format(time.RFC3339),
+		SetIndex:       0,
+		CategoryID:     1,
+		From:           2,
+		PageSize:       2,
+		Requests:       2,
+		Pages:          1,
+		TotalSeen:      2,
+		TotalNew:       2,
+		TotalUpdated:   0,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_ = store.FinishRun(ctx1, runID, "aborted", 2, 1, 2, 2, 0, 0, 0, "auto_update")
+	cancel1()
+
+	// Now resume cycle 1 on the "new binary" and let it finish cat 1 (from=2..4) and cat 4 (from=0..4).
+	groups := []categoryGroup{{label: "rent", ids: []int{1, 4}}}
+	if err := c.runCycle(context.Background(), 1, groups); err != nil {
+		t.Fatalf("resumed runCycle failed: %v", err)
+	}
+
+	runs, err := store.LastRuns(context.Background(), 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected resumed cycle to reuse the existing crawl_runs row (1 row total), got %d rows: %+v", len(runs), runs)
+	}
+	if runs[0].Status != "completed" || runs[0].Seen != 8 || runs[0].Fresh != 8 {
+		t.Fatalf("expected unified completed run with Seen=8 Fresh=8, got %+v", runs[0])
+	}
+}
+
+// Test_AutoUpdaterHandoffTelemetryAndWebAPI verifies handoff duration calculation
+// on startup and the /api/update + /api/status endpoints.
+func Test_AutoUpdaterHandoffTelemetryAndWebAPI(t *testing.T) {
+	c, store, _ := newTestCrawler(t, map[int]int{1: 2}, func(cat, from, size int) []map[string]any {
+		return genTestListings(1, 2)
+	})
+	stateDir := t.TempDir()
+	c.cfg.StateDir = stateDir
+
+	// Seed a pending handoff timestamp 250ms in the past
+	started := time.Now().UTC().Add(-250 * time.Millisecond).Format(time.RFC3339Nano)
+	seedStatus := UpdateStatus{
+		Enabled:          true,
+		Branch:           "main",
+		LastMode:         "binary_handoff",
+		BuildDurationMS:  1800,
+		HandoffPending:   true,
+		RestartPending:   true,
+		HandoffStartedAt: started,
+		TotalBinarySwaps: 1,
+	}
+	raw, _ := json.Marshal(seedStatus)
+	if err := writeFileAtomic(filepath.Join(stateDir, "last_update.json"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctrl := NewController(c.cfg, c.log, c.client, store)
+	st := ctrl.Updater().Status()
+	if st.HandoffPending || st.RestartPending {
+		t.Fatalf("expected HandoffPending and RestartPending to be cleared on startup: %+v", st)
+	}
+	if st.HandoffDurationMS < 200 || st.HandoffCompletedAt == "" {
+		t.Fatalf("expected HandoffDurationMS >= 200ms and HandoffCompletedAt set, got %+v", st)
+	}
+
+	// Verify GET /api/update and GET /api/status via webServer handler
+	ws := newWebServer(c.cfg, c.log, store, ctrl)
+	srv := httptest.NewServer(ws.handler())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/update")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/update status=%d", resp.StatusCode)
+	}
+	var gotUpd UpdateStatus
+	if err := json.NewDecoder(resp.Body).Decode(&gotUpd); err != nil {
+		t.Fatal(err)
+	}
+	if gotUpd.LastMode != "binary_handoff" || gotUpd.TotalBinarySwaps != 1 {
+		t.Fatalf("unexpected /api/update response: %+v", gotUpd)
+	}
+}
+
 var _ = time.Now

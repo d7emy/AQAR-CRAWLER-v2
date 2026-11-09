@@ -10,9 +10,10 @@
 //
 // Exit codes:
 //
-//	0 - clean stop (cycle done or graceful interrupt)
-//	1 - fatal error
-//	2 - API rejected our requests (check logs/crawler.log)
+//	0  - clean stop (cycle done or graceful interrupt)
+//	1  - fatal error
+//	2  - API rejected our requests (check logs/crawler.log)
+//	42 - auto-update binary handoff (watchdog relaunches immediately in 0s)
 package main
 
 import (
@@ -44,6 +45,10 @@ func main() {
 	compactFlag := fs.Bool("compact", false, "compact, deduplicate noise history, and compress the SQLite database in-place, then exit")
 	inspectFlag := fs.Int64("inspect", 0, "inspect a single listing ID (metadata, version diffs, and full decompressed JSON), then exit")
 	radarFlag := fs.Bool("radar", false, "print archive analytics and recent price drops/updates from the database, then exit")
+	selfTestFlag := fs.Bool("self-test", false, "run pre-swap binary smoke test and exit")
+	remoteAddr := fs.String("remote", "", "remote server address (host or host:port) for remote CLI commands")
+	remoteCmd := fs.String("remote-cmd", "status", "remote CLI command: status|update|force-update|start|stop|pause|resume|shutdown|log")
+	remoteToken := fs.String("remote-token", "", "optional X-Auth-Token for remote CLI commands (defaults to config web_token)")
 
 	// Flag values are parsed into this default config first so we can detect
 	// which flags were explicitly set, then overlaid on the file config.
@@ -51,10 +56,29 @@ func main() {
 	overrides.ApplyFlags(fs)
 	fs.Parse(os.Args[1:])
 
+	if *selfTestFlag {
+		if err := runSelfTest(*configPath); err != nil {
+			fmt.Fprintf(os.Stderr, "SELF-TEST FAILED: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
 	cfg, err := LoadConfig(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "FATAL: %v\n", err)
 		os.Exit(1)
+	}
+	if *remoteAddr != "" {
+		tok := *remoteToken
+		if tok == "" {
+			tok = cfg.WebToken
+		}
+		if err := runRemoteCLI(*remoteAddr, *remoteCmd, tok, cfg.WebPort); err != nil {
+			fmt.Fprintf(os.Stderr, "REMOTE ERROR: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
 	}
 	// Explicit command-line flags win over the config file.
 	fs.Visit(func(f *flag.Flag) {
@@ -220,7 +244,8 @@ func main() {
 	}
 
 	if *webMode {
-		code := runWeb(cfg, log, store, client)
+		code := runWeb(cfg, *configPath, log, store, client)
+		_ = store.Close()
 		os.Exit(code)
 	}
 
@@ -232,13 +257,49 @@ func main() {
 	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	runCtx, runCancel := context.WithCancel(sigCtx)
+	defer runCancel()
+
+	var exitForUpdate bool
+	var exitMu sync.Mutex
+	if cfg.AutoUpdateEnabled && !*once && !cfg.DryRun {
+		interval := time.Duration(cfg.AutoUpdateIntervalSecs) * time.Second
+		if interval <= 0 {
+			interval = 2 * time.Minute
+		}
+		updater := NewAutoUpdater(".", cfg.StateDir, *configPath, cfg.AutoUpdateBranch, interval, log,
+			func() error {
+				newCfg, err := LoadConfig(*configPath)
+				if err != nil {
+					return err
+				}
+				return newCfg.validate()
+			},
+			func(_ string) {
+				exitMu.Lock()
+				exitForUpdate = true
+				exitMu.Unlock()
+				runCancel()
+			},
+		)
+		go updater.StartLoop(runCtx)
+	}
+
 	stats := NewStats()
 
 	crawler := NewCrawler(cfg, log, client, store)
 	crawler.Stats = stats
 	crawler.Once = *once
 
-	err = crawler.Run(sigCtx)
+	err = crawler.Run(runCtx)
+	exitMu.Lock()
+	updating := exitForUpdate
+	exitMu.Unlock()
+	if updating {
+		log.Infof("[AUTO-UPDATE] crawler stopped for binary handoff; exiting with code %d", ExitCodeAutoUpdate)
+		_ = store.Close()
+		os.Exit(ExitCodeAutoUpdate)
+	}
 	reason := "stopped cleanly"
 	switch {
 	case err == ErrAPIRejected:
@@ -382,12 +443,13 @@ func runTUI(cfg Config, log *Logger, store *Store, client *Client, tuiMode, watc
 }
 
 // runWeb starts the web control panel and the crawler (controlled from the
-// browser: start/stop/pause/resume). Blocks until Ctrl+C.
-func runWeb(cfg Config, log *Logger, store *Store, client *Client) int {
+// browser: start/stop/pause/resume/update). Blocks until Ctrl+C or auto-update handoff.
+func runWeb(cfg Config, configPath string, log *Logger, store *Store, client *Client) int {
 	log.Infof("AQAR crawler web mode | db=%s panel=%s:%d",
 		cfg.DBPath, cfg.WebHost, cfg.WebPort)
 
 	ctrl := NewController(cfg, log, client, store)
+	ctrl.SetConfigPath(configPath)
 	if err := ctrl.Start(); err != nil {
 		log.Fatalf("starting crawler: %v", err)
 		return 1
@@ -404,6 +466,10 @@ func runWeb(cfg Config, log *Logger, store *Store, client *Client) int {
 
 	log.Infof("shutting down; stopping crawler (resume state kept)")
 	_ = ctrl.Stop() // blocks until the crawler goroutine exits, incl. Telegram alert
+	if ctrl.ExitForUpdate() {
+		log.Infof("[AUTO-UPDATE] web mode handoff ready; exiting with code %d", ExitCodeAutoUpdate)
+		return ExitCodeAutoUpdate
+	}
 	if lastErr := ctrl.LastError(); lastErr != "" {
 		log.Errorf("last crawler error: %s", lastErr)
 		if strings.Contains(lastErr, "API rejected") {

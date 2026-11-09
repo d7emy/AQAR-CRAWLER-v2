@@ -1,5 +1,9 @@
-# Binaries
+# Binaries & self-update artifacts
 *.exe
+*.new
+*.old
+*.tmp.*
+aqar-crawler
 *.dll
 *.so
 *.dylib
@@ -14,8 +18,9 @@
 *.db.compact*
 *.db.bak*
 
-# Runtime logs & local config with credentials
+# Runtime logs, state checkpoints, & local config with credentials
 logs/
+state/
 config.json
 
 # Raw captures & legacy v1 reference folder

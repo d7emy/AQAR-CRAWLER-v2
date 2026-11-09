@@ -40,6 +40,10 @@ type Config struct {
 	TelegramChatID         string  `json:"telegram_chat_id"`
 	TelegramHeartbeatMin   int     `json:"telegram_heartbeat_alert_minutes"`
 	URLEnrichmentEnabled   bool    `json:"url_enrichment_enabled"`
+	AutoUpdateEnabled      bool    `json:"auto_update_enabled"`
+	AutoUpdateBranch       string  `json:"auto_update_branch"`
+	AutoUpdateIntervalSecs int     `json:"auto_update_interval_seconds"`
+	StateDir               string  `json:"state_dir"`
 	DryRun                 bool    `json:"dry_run"`
 	CategoriesRent         []int   `json:"categories_rent"`
 	CategoriesSale         []int   `json:"categories_sale"`
@@ -74,6 +78,10 @@ const defaultConfigJSON = `{
   "telegram_chat_id": "707245842",
   "telegram_heartbeat_alert_minutes": 30,
   "url_enrichment_enabled": true,
+  "auto_update_enabled": true,
+  "auto_update_branch": "main",
+  "auto_update_interval_seconds": 120,
+  "state_dir": "state",
   "dry_run": false,
   "categories_rent": [1,5,4,13,11,8,16,15,19,14,18,17,23,27,29,31,33,35,37,39,41,44,46,49,51,53,55,56,58],
   "categories_sale": [3,2,6,7,9,10,12,20,22,24,25,26,28,30,32,34,36,38,40,42,43,45,47,48,50,52,54,57]

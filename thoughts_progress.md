@@ -176,3 +176,17 @@ Reverse-engineered the AQAR (عقار) iOS app API from a Burp Suite capture (13
      - Structural: `area`, `meter_price`, `beds`, `rooms`, `livings`, `wc`, `property_age`, `street_width`, `street_direction`, `length`, `width`, `flooors`, `apartments`, `stores`, `duplex`, `basement`, `pool`, `elevator`, `maid`, `driver`, `furnished`, `ac`, `car_entrance`.
      - Broker & Regulatory Trust (REGA/FAL): `user_id`, `user.type`, `user.review`, `user.paid`, `verified`, `iam_verified`, `deed_verified`, `rega_licensed`, `fal_license_number`, `ad_license_number`.
      - Seller Urgency: `refresh - create_time` (bump frequency), `premium`, `boosted`, and `price_changes`.
+
+
+## Zero-Downtime CI/CD & API-Driven Self-Update Architecture
+- User requested implementing the **Zero-Downtime CI/CD & API-Driven Self-Update Architecture** so `aqar-crawler` can run 24/7 on a remote server and self-update via Git + HTTP API (`POST /api/update` or CLI `-remote <host:port> -remote-cmd update`) and a periodic background Git poller.
+- Architecture components:
+  1. **Dual-Path `AutoUpdater` (`updater.go`)**:
+     - **Plan A (`0ms` Hot-Reload)**: When `git diff --name-only HEAD..origin/main` contains only non-code changes (`config*.json`, docs, static files), backs up server-local `config.json`, resets to `origin/main`, restores local `config.json`, and reloads configuration in memory (`<5ms`, zero process restart).
+     - **Plan B (`<1s` Binary Hot-Handoff)**: When `.go`, `go.mod`, or `go.sum` change (or `?force=1`), compiles `aqar-crawler.new.exe` in the background (`go build -p 2`) while the crawler continues running at 100%, verifies `aqar-crawler.new.exe -self-test` (`SELF-TEST OK`), atomically renames `aqar-crawler.exe -> aqar-crawler.old.exe` and `aqar-crawler.new.exe -> aqar-crawler.exe`, writes `state/update_restart` and `state/last_update.json` (via `writeFileAtomic`), flushes HTTP 200 JSON, and after `350ms` checkpoints mid-cycle state + SQLite WAL and exits with `ExitCodeAutoUpdate = 42`.
+  2. **Zero-Loss Mid-Cycle Session Checkpointing (`state/session_checkpoint.json` + `crawl_state`)**:
+     - Persists active `RunID`, `Cycle`, `SetIndex`, `CategoryID`, `From`, `PageSize`, in-flight cycle counters (`Requests`, `Pages`, `TotalSeen`, `TotalNew`, `TotalUpdated`, `CycleErrors`, `Categories`), `PriorUptimeSecs`, and `RestartsCount` across restarts so binary handoffs mid-cycle resume the exact same `crawl_runs` row and category progress without resetting counters or sending false Telegram stop alerts.
+  3. **Watchdog Supervisor Scripts (`run.bat`, `run-web.bat`, `run.sh`)**:
+     - Instant `0s` relaunch on exit code `42` or `state/update_restart` marker, clean exit on `state/stopfile` or exit code `0`/`2`, and automatic crash rollback (`aqar-crawler.old.exe -> aqar-crawler.exe`) if a newly swapped binary crashes on startup.
+  4. **Remote CLI & Operational Playbook (`-self-test`, `-remote`, `-remote-cmd`, `.agents/rules/auto-deploy.md`)**:
+     - Built-in CLI remote controller (`aqar-crawler.exe -remote <host:port> -remote-cmd status|update|force-update|pause|resume|stop|shutdown|log`) and operational rules in `.agents/rules/auto-deploy.md`.

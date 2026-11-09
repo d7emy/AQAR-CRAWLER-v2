@@ -32,10 +32,14 @@ type Crawler struct {
 	Stats *Stats
 	// dryRun skips all database writes (fetch + log only).
 	dryRun bool
+	// PriorUptimeSecs and RestartsCount track cumulative session continuity across self-updates.
+	PriorUptimeSecs int64
+	RestartsCount   int
+	startedAt       time.Time
 }
 
 func NewCrawler(cfg Config, log *Logger, client *Client, store *Store) *Crawler {
-	c := &Crawler{cfg: cfg, log: log, client: client, store: store, dryRun: cfg.DryRun}
+	c := &Crawler{cfg: cfg, log: log, client: client, store: store, dryRun: cfg.DryRun, startedAt: time.Now()}
 	if cfg.URLEnrichmentEnabled {
 		c.web = NewWebClient(cfg, log)
 	}
@@ -338,14 +342,6 @@ func (c *Crawler) runCycle(ctx context.Context, cycle int, groups []categoryGrou
 		}
 	}
 
-	runID := int64(0)
-	if !c.dryRun {
-		runID, err = c.store.StartRun(ctx, cycle)
-		if err != nil {
-			return fmt.Errorf("starting run row: %w", err)
-		}
-	}
-
 	var (
 		requests     int // count + page requests
 		pages        int // page requests only
@@ -356,6 +352,38 @@ func (c *Crawler) runCycle(ctx context.Context, cycle int, groups []categoryGrou
 		lastErr      string
 		catIndex     int // index into cats / stats
 	)
+
+	var priorCP SessionCheckpoint
+	hasCP := false
+	if hasResume {
+		if cp, ok, cerr := c.store.LoadSessionCheckpoint(ctx, c.cfg.StateDir); cerr == nil && ok && cp.Cycle == cycle {
+			priorCP = cp
+			hasCP = true
+			requests = cp.Requests
+			pages = cp.Pages
+			totalSeen = cp.TotalSeen
+			totalNew = cp.TotalNew
+			totalUpdated = cp.TotalUpdated
+			cycleErrors = cp.CycleErrors
+			if c.Stats != nil {
+				c.Stats.RestoreCycle(cycle, cp.CycleStartedAt, requests, pages, totalSeen, totalNew, totalUpdated, cycleErrors, cp.ActiveCat, cp.Categories)
+			}
+			c.log.Infof("[CHECKPOINT] restored mid-cycle %d state (run=%d, req=%d, pages=%d, seen=%d, new=%d, upd=%d)",
+				cycle, cp.RunID, requests, pages, totalSeen, totalNew, totalUpdated)
+		}
+	}
+
+	runID := int64(0)
+	if !c.dryRun {
+		if hasCP && priorCP.RunID > 0 {
+			runID, err = c.store.ResumeRun(ctx, priorCP.RunID, cycle)
+		} else {
+			runID, err = c.store.StartRun(ctx, cycle)
+		}
+		if err != nil {
+			return fmt.Errorf("starting run row: %w", err)
+		}
+	}
 
 	// pace sleeps a uniform-random amount in [sleep_min, sleep_max] between
 	// requests, pauses completely while paused, and aborts on ctx cancel.
@@ -550,10 +578,35 @@ func (c *Crawler) runCycle(ctx context.Context, cycle int, groups []categoryGrou
 					}
 				}
 
+				nextFrom := from + len(page.Listings)
 				if !c.dryRun {
-					if err := c.store.SaveState(ctx, CrawlState{Cycle: cycle, SetIndex: setIdx, CategoryID: catID, From: from, PageSize: c.cfg.PageSize}); err != nil {
+					if err := c.store.SaveState(ctx, CrawlState{Cycle: cycle, SetIndex: setIdx, CategoryID: catID, From: nextFrom, PageSize: c.cfg.PageSize}); err != nil {
 						c.log.Errorf("saving resume state: %v", err)
 					}
+					var snap LiveStats
+					if c.Stats != nil {
+						snap = c.Stats.Snapshot()
+					}
+					_ = c.store.SaveSessionCheckpoint(ctx, c.cfg.StateDir, SessionCheckpoint{
+						RunID:           runID,
+						Cycle:           cycle,
+						CycleStartedAt:  snap.CycleStartedAt,
+						SetIndex:        setIdx,
+						CategoryID:      catID,
+						From:            nextFrom,
+						PageSize:        c.cfg.PageSize,
+						Requests:        requests,
+						Pages:           pages,
+						TotalSeen:       totalSeen,
+						TotalNew:        totalNew,
+						TotalUpdated:    totalUpdated,
+						CycleErrors:     cycleErrors,
+						ActiveCat:       catIdx,
+						Categories:      snap.Categories,
+						PriorUptimeSecs: c.PriorUptimeSecs + int64(time.Since(c.startedAt).Seconds()),
+						RestartsCount:   c.RestartsCount,
+						Reason:          "page_checkpoint",
+					})
 					if pages > 0 && pages%100 == 0 {
 						if err := c.store.Checkpoint(ctx); err != nil {
 							c.log.Warnf("mid-cycle wal checkpoint: %v", err)
@@ -567,7 +620,7 @@ func (c *Crawler) runCycle(ctx context.Context, cycle int, groups []categoryGrou
 					grp.label, catID, catPages, catPageCount, pct, requests, totalSeen, totalNew, totalUpdated)
 				syncStats()
 
-				from += len(page.Listings)
+				from = nextFrom
 				if len(page.Listings) == 0 {
 					c.log.Warnf("cat %d returned an empty page at from=%d (total=%d); stopping category", catID, from, total)
 					if c.Stats != nil {
@@ -602,14 +655,42 @@ func (c *Crawler) runCycle(ctx context.Context, cycle int, groups []categoryGrou
 
 	interrupted := ctx.Err() != nil
 	if interrupted {
-		// Manual stop: keep the resume state so the next start continues,
-		// and NEVER run the removed-detection pass on a partial cycle.
-		c.log.Infof("cycle %d interrupted; resume state kept, removed-pass skipped", cycle)
+		// Manual stop or self-update handoff: keep the resume state + session checkpoint
+		// so the next start continues seamlessly, and NEVER run the removed-detection
+		// pass on a partial cycle.
+		c.log.Infof("cycle %d interrupted; resume state and session checkpoint saved, removed-pass skipped", cycle)
 		if !c.dryRun {
 			fctx, fcancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if st, ok, _ := c.store.LoadState(fctx); ok && st.Cycle == cycle {
+				var snap LiveStats
+				if c.Stats != nil {
+					snap = c.Stats.Snapshot()
+				}
+				_ = c.store.SaveSessionCheckpoint(fctx, c.cfg.StateDir, SessionCheckpoint{
+					RunID:           runID,
+					Cycle:           cycle,
+					CycleStartedAt:  snap.CycleStartedAt,
+					SetIndex:        st.SetIndex,
+					CategoryID:      st.CategoryID,
+					From:            st.From,
+					PageSize:        c.cfg.PageSize,
+					Requests:        requests,
+					Pages:           pages,
+					TotalSeen:       totalSeen,
+					TotalNew:        totalNew,
+					TotalUpdated:    totalUpdated,
+					CycleErrors:     cycleErrors,
+					ActiveCat:       snap.ActiveCat,
+					Categories:      snap.Categories,
+					PriorUptimeSecs: c.PriorUptimeSecs + int64(time.Since(c.startedAt).Seconds()),
+					RestartsCount:   c.RestartsCount,
+					Reason:          "interrupted",
+				})
+			}
 			if err := c.store.FinishRun(fctx, runID, "aborted", requests, pages, totalSeen, totalNew, totalUpdated, 0, cycleErrors, "stopped by user"); err != nil {
 				c.log.Errorf("finishing run row: %v", err)
 			}
+			_ = c.store.Checkpoint(fctx)
 			fcancel()
 		}
 		if c.Stats != nil {
@@ -625,6 +706,7 @@ func (c *Crawler) runCycle(ctx context.Context, cycle int, groups []categoryGrou
 		if err := c.store.ClearState(ctx); err != nil {
 			c.log.Errorf("clearing resume state: %v", err)
 		}
+		_ = c.store.ClearSessionCheckpoint(ctx, c.cfg.StateDir)
 		// persist the next cycle number so restarts don't reset numbering
 		if err := c.store.SaveNextCycle(ctx, cycle+1); err != nil {
 			c.log.Errorf("saving next cycle: %v", err)

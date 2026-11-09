@@ -101,6 +101,31 @@ func (s *Stats) BeginCycle(cycle int, cats []CatStat) {
 	s.cats = cats
 }
 
+func (s *Stats) RestoreCycle(cycle int, startedAt string, requests, pages, seen, fresh, updated, errors, activeCat int, cats []CatStat) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cycle = cycle
+	if t, err := time.Parse(time.RFC3339, startedAt); err == nil {
+		s.cycleStartedAt = t
+	} else if s.cycleStartedAt.IsZero() {
+		s.cycleStartedAt = time.Now()
+	}
+	s.nextCycleAt = time.Time{}
+	s.running = true
+	s.requests = requests
+	s.pages = pages
+	s.seen = seen
+	s.fresh = fresh
+	s.updated = updated
+	s.errors = errors
+	if len(cats) > 0 && len(cats) == len(s.cats) {
+		s.cats = append([]CatStat(nil), cats...)
+	}
+	if activeCat >= 0 && activeCat < len(s.cats) {
+		s.activeCat = activeCat
+	}
+}
+
 func (s *Stats) SetCounters(requests, pages, seen, fresh, updated, removed, errors int, lastError string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

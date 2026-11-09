@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -217,7 +218,102 @@ func (s *Store) LoadState(ctx context.Context) (CrawlState, bool, error) {
 }
 
 func (s *Store) ClearState(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM crawl_state WHERE key = 'resume'`)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM crawl_state WHERE key IN ('resume', 'session_checkpoint')`)
+	return err
+}
+
+// ResumeRun reopens an existing crawl_runs row when a cycle resumes after a
+// hot-handoff or graceful restart so the cycle finishes as a single unified
+// run instead of splitting into an "aborted" row. Falls back to StartRun if
+// the prior row does not exist.
+func (s *Store) ResumeRun(ctx context.Context, runID int64, cycle int) (int64, error) {
+	if runID > 0 {
+		res, err := s.db.ExecContext(ctx,
+			`UPDATE crawl_runs SET status = 'running', finished_at = NULL, last_error = NULL WHERE id = ? AND cycle = ?`,
+			runID, cycle)
+		if err == nil {
+			if n, _ := res.RowsAffected(); n > 0 {
+				return runID, nil
+			}
+		}
+	}
+	return s.StartRun(ctx, cycle)
+}
+
+// SessionCheckpoint persists in-flight cycle counters, category progress,
+// and cumulative uptime/restart counters across process restarts (such as
+// Plan B <1s binary hot-handoffs).
+type SessionCheckpoint struct {
+	RunID           int64     `json:"run_id"`
+	Cycle           int       `json:"cycle"`
+	CycleStartedAt  string    `json:"cycle_started_at"`
+	SetIndex        int       `json:"set_index"`
+	CategoryID      int       `json:"category_id"`
+	From            int       `json:"from"`
+	PageSize        int       `json:"page_size"`
+	Requests        int       `json:"requests"`
+	Pages           int       `json:"pages"`
+	TotalSeen       int       `json:"total_seen"`
+	TotalNew        int       `json:"total_new"`
+	TotalUpdated    int       `json:"total_updated"`
+	CycleErrors     int       `json:"cycle_errors"`
+	ActiveCat       int       `json:"active_cat"`
+	Categories      []CatStat `json:"categories,omitempty"`
+	PriorUptimeSecs int64     `json:"prior_uptime_secs"`
+	RestartsCount   int       `json:"restarts_count"`
+	Reason          string    `json:"reason"`
+	SavedAt         string    `json:"saved_at"`
+}
+
+func (s *Store) SaveSessionCheckpoint(ctx context.Context, stateDir string, cp SessionCheckpoint) error {
+	if cp.SavedAt == "" {
+		cp.SavedAt = nowUTC()
+	}
+	data, err := json.MarshalIndent(cp, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal session checkpoint: %w", err)
+	}
+	if stateDir != "" {
+		_ = writeFileAtomic(filepath.Join(stateDir, "session_checkpoint.json"), data, 0o644)
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO crawl_state (key, value) VALUES ('session_checkpoint', ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, string(data))
+	if err != nil {
+		return fmt.Errorf("save session checkpoint: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) LoadSessionCheckpoint(ctx context.Context, stateDir string) (SessionCheckpoint, bool, error) {
+	if stateDir != "" {
+		if raw, err := os.ReadFile(filepath.Join(stateDir, "session_checkpoint.json")); err == nil {
+			var cp SessionCheckpoint
+			if json.Unmarshal(raw, &cp) == nil && cp.Cycle >= 0 {
+				return cp, true, nil
+			}
+		}
+	}
+	var raw string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM crawl_state WHERE key = 'session_checkpoint'`).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return SessionCheckpoint{}, false, nil
+	}
+	if err != nil {
+		return SessionCheckpoint{}, false, fmt.Errorf("load session checkpoint: %w", err)
+	}
+	var cp SessionCheckpoint
+	if err := json.Unmarshal([]byte(raw), &cp); err != nil {
+		return SessionCheckpoint{}, false, fmt.Errorf("parse session checkpoint: %w", err)
+	}
+	return cp, true, nil
+}
+
+func (s *Store) ClearSessionCheckpoint(ctx context.Context, stateDir string) error {
+	if stateDir != "" {
+		_ = os.Remove(filepath.Join(stateDir, "session_checkpoint.json"))
+	}
+	_, err := s.db.ExecContext(ctx, `DELETE FROM crawl_state WHERE key = 'session_checkpoint'`)
 	return err
 }
 

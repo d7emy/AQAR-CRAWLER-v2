@@ -66,8 +66,10 @@
   <header>
     <h1>AQAR Crawler v2</h1>
     <span id="pill" class="pill stopped">STOPPED</span>
+    <span id="commitPill" class="muted" style="font-family:Consolas,monospace;font-size:12px"></span>
     <span id="addr" class="muted"></span>
     <div class="spacer"></div>
+    <button id="btnUpdate" class="btn" onclick="triggerUpdate()" title="Fetch origin/main and apply hot-reload or <1s binary handoff">Update (Git)</button>
     <a class="btn" href="/api/export" target="_blank">Export CSV</a>
     <button id="btnPause" class="btn warn" onclick="ctrl('pause')">Pause</button>
     <button id="btnResume" class="btn primary" onclick="ctrl('resume')">Resume</button>
@@ -105,6 +107,7 @@
       <div><span class="k">Categories</span> <b id="iCats">-</b></div>
       <div><span class="k">Database</span> <b id="iDb">-</b></div>
       <div><span class="k">Archive health</span> <b id="iArchiveHealth">-</b></div>
+      <div><span class="k">Auto-Updater</span> <b id="iUpdate">-</b></div>
     </div>
   </div>
 
@@ -246,6 +249,18 @@ async function refresh(){
     : "off (24/7 watchdog)";
   $("iDb").textContent = db.path;
   $("iDb").title = db.path;
+  if(s.update){
+    const u = s.update;
+    $("commitPill").textContent = u.current_commit ? ("@"+u.current_commit) : "";
+    let utxt = (u.current_commit || "local") + (u.up_to_date ? " (up to date)" : " (update available)");
+    if(u.last_mode && u.last_mode !== "none"){
+      utxt += " | last: " + u.last_mode;
+      if(u.build_duration_ms) utxt += " (" + u.build_duration_ms + "ms build";
+      if(u.handoff_duration_ms) utxt += ", " + u.handoff_duration_ms + "ms handoff";
+      if(u.build_duration_ms) utxt += ")";
+    }
+    $("iUpdate").textContent = utxt;
+  }
 
   $("errbox").style.display = s.last_error ? "block" : "none";
   $("errbox").textContent = s.last_error ? "Last crawler error: "+s.last_error : "";
@@ -430,6 +445,30 @@ async function ctrl(action){
   }
   btn.disabled = false;
   setTimeout(refresh, 300);
+}
+
+async function triggerUpdate(){
+  const btn = $("btnUpdate");
+  btn.disabled = true;
+  btn.textContent = "Updating...";
+  try{
+    const r = await api("/api/update", {method:"POST"});
+    const j = await r.json();
+    if(j.last_error){
+      $("errbox").textContent = "✗ Update failed: " + j.last_error;
+    } else if(j.restart_pending){
+      $("errbox").textContent = "✓ Binary compiled ("+j.build_duration_ms+"ms) — executing <1s hot handoff to @"+j.current_commit+"...";
+    } else {
+      $("errbox").textContent = "✓ Update check complete: mode="+(j.last_mode||"none")+" @"+(j.current_commit||"");
+    }
+    $("errbox").style.display = "block";
+  }catch(e){
+    $("errbox").textContent = "Update request failed: "+e.message;
+    $("errbox").style.display = "block";
+  }
+  btn.disabled = false;
+  btn.textContent = "Update (Git)";
+  setTimeout(refresh, 600);
 }
 
 refresh();
