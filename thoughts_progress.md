@@ -190,3 +190,11 @@ Reverse-engineered the AQAR (عقار) iOS app API from a Burp Suite capture (13
      - Instant `0s` relaunch on exit code `42` or `state/update_restart` marker, clean exit on `state/stopfile` or exit code `0`/`2`, and automatic crash rollback (`aqar-crawler.old.exe -> aqar-crawler.exe`) if a newly swapped binary crashes on startup.
   4. **Remote CLI & Operational Playbook (`-self-test`, `-remote`, `-remote-cmd`, `.agents/rules/auto-deploy.md`)**:
      - Built-in CLI remote controller (`aqar-crawler.exe -remote <host:port> -remote-cmd status|update|force-update|pause|resume|stop|shutdown|log`) and operational rules in `.agents/rules/auto-deploy.md`.
+
+
+## Frontend Overhaul Request (Interface Design Skill)
+- User requested a complete redesign of the project's frontend (`webui.html`) using the `interface-design` skill (`https://github.com/Dammyjay93/interface-design`).
+- Strict scope constraint: work on the frontend only (`webui.html` + `.interface-design/system.md`); do not change backend APIs, database, or data logic unless the user asks after being informed of any missing backend data.
+- Workflow: Step 1 (Understand the project & data brief) -> Step 2 (Propose 3 distinct creative directions, recommend one, and wait for user's choice before building) -> Step 3 (Build in existing frontend stack) -> Step 4 (Save approved system to `.interface-design/system.md`).
+
+- User selected **Direction 3: "Editorial Property Chronicle & Observatory"** (high-contrast economic research publication aesthetic inspired by *Financial Times* / *The Economist* statistical monographs: warm newsprint/parchment in light mode and obsidian press-room ink in dark mode, editorial serif display headlines paired with tabular monospace figures, hairline rules, diverging price-revision dumbbell charts, category liquidity horizon plots, and a 115-field cadastral property monograph).

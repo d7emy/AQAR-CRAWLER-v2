@@ -1,168 +1,1132 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>AQAR Crawler v2 - Watchdog & Archive Control Panel</title>
+<title>The AQAR Chronicle — Kingdom Cadastral Archive & Price-Revision Observatory</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 <style>
-  :root{
-    --bg:#0d1117; --panel:#161b22; --border:#30363d; --text:#e6edf3;
-    --muted:#8b949e; --accent:#2f81f7; --green:#3fb950; --red:#f85149;
-    --yellow:#d29922; --bar-bg:#21262d;
+  /* ==========================================================================
+     AQAR v2 DESIGN SYSTEM — "Editorial Property Chronicle & Observatory"
+     See .interface-design/system.md for full token & hierarchy specification.
+     ========================================================================== */
+  :root, [data-theme="light"] {
+    --chronicle-paper:      #F6F1E9;
+    --chronicle-vellum:     #FBF8F3;
+    --chronicle-well:       #EDE5D8;
+    --chronicle-hover:      #F0E9DC;
+    --chronicle-ink:        #141311;
+    --chronicle-walnut:     #47423B;
+    --chronicle-sandstone:  #756E63;
+    --chronicle-muted:      #9A9286;
+    --chronicle-rule:       rgba(20, 19, 17, 0.13);
+    --chronicle-rule-soft:  rgba(20, 19, 17, 0.07);
+    --chronicle-rule-heavy: #141311;
+
+    /* Semantic & Color-Blind Safe Directional Palette */
+    --chronicle-terracotta: #B84A27;
+    --chronicle-terracotta-bg: rgba(184, 74, 39, 0.10);
+    --chronicle-cobalt:     #16538E; /* Price Cut / Buyer Opportunity (▼) */
+    --chronicle-cobalt-bg:  rgba(22, 83, 142, 0.10);
+    --chronicle-ochre:      #A84B08; /* Price Hike / Caution (▲) */
+    --chronicle-ochre-bg:   rgba(168, 75, 8, 0.11);
+    --chronicle-emerald:    #1A6B4A; /* Active / Running */
+    --chronicle-emerald-bg: rgba(26, 107, 74, 0.10);
+    --chronicle-crimson:    #A61E22; /* Error / Stopped */
+    --chronicle-crimson-bg: rgba(166, 30, 34, 0.10);
+
+    --control-bg:           #FBF8F3;
+    --control-border:       rgba(20, 19, 17, 0.24);
+    --input-bg:             #EDE5D8;
   }
-  *{box-sizing:border-box; margin:0; padding:0}
-  body{background:var(--bg); color:var(--text); font:14px/1.45 "Segoe UI", system-ui, sans-serif; padding:16px}
-  .wrap{max-width:1240px; margin:0 auto}
-  header{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px}
-  h1{font-size:18px; font-weight:600}
-  .pill{padding:3px 12px; border-radius:20px; font-size:12px; font-weight:600; letter-spacing:.4px}
-  .pill.running{background:#0f2d1a; color:var(--green); border:1px solid var(--green)}
-  .pill.paused{background:#332a10; color:var(--yellow); border:1px solid var(--yellow)}
-  .pill.stopped{background:#2d1417; color:var(--red); border:1px solid var(--red)}
-  .spacer{flex:1}
-  .btn{padding:6px 14px; border-radius:6px; border:1px solid var(--border); background:var(--panel); color:var(--text); cursor:pointer; font-size:13px; font-weight:600; text-decoration:none; display:inline-block}
-  .btn:hover{filter:brightness(1.25)}
-  .btn:disabled{opacity:.45; cursor:not-allowed}
-  .btn.primary{background:var(--accent); border-color:var(--accent); color:#fff}
-  .btn.danger{background:var(--red); border-color:var(--red); color:#fff}
-  .btn.warn{background:var(--yellow); border-color:var(--yellow); color:#111}
-  .btn.sm{padding:3px 9px; font-size:12px}
-  .input{padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:#010409; color:var(--text); font-size:13px}
-  .cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(145px,1fr)); gap:10px; margin-bottom:14px}
-  .card{background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:10px 12px}
-  .card .lbl{font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px}
-  .card .val{font-size:20px; font-weight:700; margin-top:2px; font-variant-numeric:tabular-nums}
-  .card .val.green{color:var(--green)} .card .val.red{color:var(--red)} .card .val.yellow{color:var(--yellow)} .card .val.blue{color:var(--accent)}
-  .panel{background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:12px 14px; margin-bottom:14px}
-  .panel-head{display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:10px}
-  .panel h2{font-size:13px; color:var(--muted); text-transform:uppercase; letter-spacing:.6px; margin-bottom:10px}
-  .panel-head h2{margin-bottom:0}
-  .info-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:8px 20px; font-size:13px}
-  .info-grid b{color:var(--text)}
-  .info-grid .k{color:var(--muted)}
-  .errbox{background:#2d1417; border:1px solid var(--red); color:var(--red); border-radius:6px; padding:8px 12px; margin-top:8px; margin-bottom:12px; display:none; font-size:13px}
-  .cat{display:flex; align-items:center; gap:10px; padding:5px 0; font-size:13px}
-  .cat .name{width:230px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text)}
-  .cat .tag{width:64px; color:var(--muted); font-variant-numeric:tabular-nums}
-  .cat .bar{flex:1; height:14px; background:var(--bar-bg); border-radius:4px; overflow:hidden; position:relative}
-  .cat .bar i{display:block; height:100%; background:var(--accent); border-radius:4px; transition:width .4s}
-  .cat .bar i.done{background:var(--green)}
-  .cat .bar i.err{background:var(--red)}
-  .cat .pct{width:46px; text-align:right; font-variant-numeric:tabular-nums; color:var(--muted)}
-  .cat.active{outline:1px solid var(--accent); border-radius:4px; padding:5px 4px}
-  table{width:100%; border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums}
-  th,td{padding:6px 8px; text-align:right; border-bottom:1px solid var(--border); white-space:nowrap}
-  th:first-child,td:first-child{text-align:left}
-  .ok{color:var(--green)} .bad{color:var(--red)} .warn{color:var(--yellow)}
-  #logbox,.codebox{background:#010409; border:1px solid var(--border); border-radius:6px; padding:10px; font:12px/1.5 Consolas,monospace; height:220px; overflow-y:auto; white-space:pre-wrap}
-  .muted{color:var(--muted)}
-  a.link{color:var(--accent); text-decoration:none}
-  a.link:hover{text-decoration:underline}
-  footer{margin-top:14px; color:var(--muted); font-size:12px}
+
+  [data-theme="dark"] {
+    --chronicle-paper:      #111110;
+    --chronicle-vellum:     #181715;
+    --chronicle-well:       #0B0B0A;
+    --chronicle-hover:      #211F1C;
+    --chronicle-ink:        #F2ECE1;
+    --chronicle-walnut:     #B8B0A4;
+    --chronicle-sandstone:  #8A8277;
+    --chronicle-muted:      #625C53;
+    --chronicle-rule:       rgba(242, 236, 225, 0.12);
+    --chronicle-rule-soft:  rgba(242, 236, 225, 0.06);
+    --chronicle-rule-heavy: #F2ECE1;
+
+    --chronicle-terracotta: #E06D44;
+    --chronicle-terracotta-bg: rgba(224, 109, 68, 0.14);
+    --chronicle-cobalt:     #58A6FF; /* Price Cut / Buyer Opportunity (▼) */
+    --chronicle-cobalt-bg:  rgba(88, 166, 255, 0.14);
+    --chronicle-ochre:      #E3B341; /* Price Hike / Caution (▲) */
+    --chronicle-ochre-bg:   rgba(227, 179, 65, 0.14);
+    --chronicle-emerald:    #3FB950;
+    --chronicle-emerald-bg: rgba(63, 185, 80, 0.14);
+    --chronicle-crimson:    #F85149;
+    --chronicle-crimson-bg: rgba(248, 81, 73, 0.15);
+
+    --control-bg:           #181715;
+    --control-border:       rgba(242, 236, 225, 0.20);
+    --input-bg:             #0B0B0A;
+  }
+
+  :root {
+    --font-editorial: 'Newsreader', 'Instrument Serif', Georgia, 'Times New Roman', serif;
+    --font-sans:      'Segoe UI', -apple-system, BlinkMacSystemFont, 'Noto Sans Arabic', Tahoma, sans-serif;
+    --font-mono:      'JetBrains Mono', 'Cascadia Mono', 'SFMono-Regular', Consolas, monospace;
+
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+    --space-8: 32px;
+
+    --radius-xs: 2px;
+    --radius-sm: 4px;
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background: var(--chronicle-paper);
+    color: var(--chronicle-ink);
+  }
+  body {
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    background: var(--chronicle-paper);
+    color: var(--chronicle-ink);
+    padding: var(--space-4) var(--space-6) var(--space-8);
+    transition: background-color 180ms var(--ease-out), color 180ms var(--ease-out);
+  }
+
+  .broadsheet {
+    max-width: 1440px;
+    margin: 0 auto;
+  }
+
+  /* Typography & Numeric Utilities */
+  .num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+  .kicker {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--chronicle-sandstone);
+  }
+  .serif-title {
+    font-family: var(--font-editorial);
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+
+  /* ==========================================================================
+     MASTHEAD (BROADSHEET HEADER)
+     ========================================================================== */
+  .masthead {
+    border-top: 3px solid var(--chronicle-rule-heavy);
+    border-bottom: 1px solid var(--chronicle-rule-heavy);
+    padding: var(--space-3) 0;
+    margin-bottom: var(--space-5);
+  }
+  .masthead-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--chronicle-rule);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--chronicle-sandstone);
+  }
+  .masthead-meta-left, .masthead-meta-right {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+  }
+  .masthead-main {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+    padding: var(--space-3) 0 var(--space-1);
+  }
+  .masthead-brand h1 {
+    font-family: var(--font-editorial);
+    font-size: clamp(26px, 3.2vw, 38px);
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    line-height: 1.05;
+  }
+  .masthead-brand .arabic-sub {
+    font-family: var(--font-sans);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--chronicle-terracotta);
+    margin-left: var(--space-2);
+  }
+  .masthead-brand p {
+    font-size: 12.5px;
+    color: var(--chronicle-walnut);
+    margin-top: 4px;
+  }
+  .masthead-controls {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  /* Status Stamp */
+  .stamp {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: var(--radius-xs);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    border: 1px solid currentColor;
+  }
+  .stamp .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .stamp.running {
+    color: var(--chronicle-emerald);
+    background: var(--chronicle-emerald-bg);
+  }
+  .stamp.running .dot {
+    animation: pulseDot 1.8s infinite ease-in-out;
+  }
+  .stamp.paused {
+    color: var(--chronicle-ochre);
+    background: var(--chronicle-ochre-bg);
+  }
+  .stamp.stopped {
+    color: var(--chronicle-crimson);
+    background: var(--chronicle-crimson-bg);
+  }
+  @keyframes pulseDot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.35; transform: scale(0.8); }
+  }
+
+  /* Controls & Buttons */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 36px;
+    padding: 6px 13px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--control-border);
+    background: var(--control-bg);
+    color: var(--chronicle-ink);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    transition: transform 120ms var(--ease-out), background-color 140ms var(--ease-out), border-color 140ms var(--ease-out);
+  }
+  .btn:hover:not(:disabled) {
+    background: var(--chronicle-hover);
+    border-color: var(--chronicle-ink);
+  }
+  .btn:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+  .btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  .btn.accent {
+    background: var(--chronicle-terracotta);
+    border-color: var(--chronicle-terracotta);
+    color: #FFF;
+  }
+  .btn.accent:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+  .btn.cobalt {
+    color: var(--chronicle-cobalt);
+    border-color: var(--chronicle-cobalt);
+    background: var(--chronicle-cobalt-bg);
+  }
+  .btn.danger {
+    color: var(--chronicle-crimson);
+    border-color: var(--chronicle-crimson);
+    background: var(--chronicle-crimson-bg);
+  }
+  .btn.sm {
+    min-height: 28px;
+    padding: 3px 9px;
+    font-size: 11px;
+  }
+  .input {
+    min-height: 36px;
+    padding: 6px 11px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--control-border);
+    background: var(--input-bg);
+    color: var(--chronicle-ink);
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+  }
+  .input:focus {
+    outline: 2px solid var(--chronicle-terracotta);
+    outline-offset: 1px;
+  }
+
+  /* Alert Banner */
+  .notice-banner {
+    display: none;
+    padding: var(--space-2) var(--space-3);
+    margin-bottom: var(--space-4);
+    border-left: 3px solid var(--chronicle-terracotta);
+    background: var(--chronicle-vellum);
+    border-top: 1px solid var(--chronicle-rule);
+    border-right: 1px solid var(--chronicle-rule);
+    border-bottom: 1px solid var(--chronicle-rule);
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    color: var(--chronicle-ink);
+  }
+
+  /* ==========================================================================
+     FRONT-PAGE LEDGER (3-COLUMN SOVEREIGN TELEMETRY RIBBON)
+     ========================================================================== */
+  .front-ledger {
+    display: grid;
+    grid-template-columns: 1.25fr 1.35fr 1fr;
+    background: var(--chronicle-vellum);
+    border-top: 2px solid var(--chronicle-rule-heavy);
+    border-bottom: 1px solid var(--chronicle-rule);
+    border-left: 1px solid var(--chronicle-rule);
+    border-right: 1px solid var(--chronicle-rule);
+    margin-bottom: var(--space-6);
+  }
+  .ledger-col {
+    padding: var(--space-4) var(--space-5);
+    border-right: 1px solid var(--chronicle-rule);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .ledger-col:last-child {
+    border-right: none;
+  }
+  .hero-figure-row {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
+    margin: var(--space-1) 0 var(--space-2);
+    flex-wrap: wrap;
+  }
+  .hero-figure {
+    font-family: var(--font-mono);
+    font-size: clamp(28px, 3vw, 36px);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1.05;
+    font-variant-numeric: tabular-nums;
+  }
+  .hero-unit {
+    font-family: var(--font-editorial);
+    font-style: italic;
+    font-size: 16px;
+    color: var(--chronicle-walnut);
+  }
+
+  /* Stacked Composition Bar */
+  .comp-bar-wrap {
+    margin-top: var(--space-2);
+  }
+  .comp-bar {
+    display: flex;
+    height: 10px;
+    width: 100%;
+    background: var(--chronicle-well);
+    border-radius: var(--radius-xs);
+    overflow: hidden;
+    gap: 1px;
+  }
+  .comp-seg-active { background: var(--chronicle-emerald); transition: width 300ms var(--ease-out); }
+  .comp-seg-updated { background: var(--chronicle-cobalt); transition: width 300ms var(--ease-out); }
+  .comp-seg-removed { background: var(--chronicle-sandstone); opacity: 0.55; transition: width 300ms var(--ease-out); }
+  .comp-legend {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    margin-top: 6px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--chronicle-walnut);
+  }
+  .swatch {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 1px;
+    margin-right: 4px;
+    vertical-align: middle;
+  }
+
+  /* Active Category Spotlight inside Front Ledger */
+  .spotlight-box {
+    margin-top: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: var(--chronicle-paper);
+    border: 1px solid var(--chronicle-rule);
+    border-left: 3px solid var(--chronicle-terracotta);
+  }
+  .spotlight-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: var(--space-2);
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+  .ruler-bar {
+    height: 6px;
+    background: var(--chronicle-well);
+    margin-top: 6px;
+    border-radius: 1px;
+    overflow: hidden;
+  }
+  .ruler-bar > i {
+    display: block;
+    height: 100%;
+    background: var(--chronicle-terracotta);
+    transition: width 300ms var(--ease-out);
+  }
+
+  /* Key-Value Tabular Pair List */
+  .kv-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 16px;
+    margin-top: var(--space-2);
+  }
+  .kv-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 1px dotted var(--chronicle-rule);
+    padding-bottom: 3px;
+    font-size: 12.5px;
+  }
+  .kv-item .k { color: var(--chronicle-sandstone); }
+  .kv-item .v { font-family: var(--font-mono); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* ==========================================================================
+     BROADSHEET TWO-COLUMN WORKSPACE
+     ========================================================================== */
+  .workspace-grid {
+    display: grid;
+    grid-template-columns: 1.35fr 1fr;
+    gap: var(--space-6);
+    align-items: start;
+    margin-bottom: var(--space-6);
+  }
+
+  .section-block {
+    background: var(--chronicle-vellum);
+    border-top: 2px solid var(--chronicle-rule-heavy);
+    border-left: 1px solid var(--chronicle-rule);
+    border-right: 1px solid var(--chronicle-rule);
+    border-bottom: 1px solid var(--chronicle-rule);
+    margin-bottom: var(--space-6);
+  }
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--chronicle-rule);
+  }
+  .section-head h2 {
+    font-family: var(--font-editorial);
+    font-size: 21px;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+  }
+  .section-sub {
+    font-size: 12px;
+    color: var(--chronicle-sandstone);
+  }
+  .section-body {
+    padding: var(--space-4);
+  }
+
+  /* ==========================================================================
+     PRICE-REVISION DUMBBELL & SPREAD CHRONICLE
+     ========================================================================== */
+  .spread-summary-strip {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    border-bottom: 1px solid var(--chronicle-rule);
+    background: var(--chronicle-paper);
+  }
+  .spread-stat {
+    padding: var(--space-2) var(--space-3);
+    border-right: 1px solid var(--chronicle-rule);
+  }
+  .spread-stat:last-child { border-right: none; }
+  .spread-stat .val {
+    font-family: var(--font-mono);
+    font-size: 16px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    margin-top: 2px;
+  }
+
+  /* Diverging Dumbbell Vector Chart */
+  .dumbbell-stage {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--chronicle-rule);
+    background: var(--chronicle-vellum);
+  }
+  .dumbbell-row {
+    display: grid;
+    grid-template-columns: 150px 1fr 125px;
+    align-items: center;
+    gap: var(--space-3);
+    padding: 4px 0;
+    font-size: 12px;
+    cursor: pointer;
+    border-bottom: 1px dashed var(--chronicle-rule-soft);
+  }
+  .dumbbell-row:hover {
+    background: var(--chronicle-hover);
+  }
+  .dumbbell-track {
+    position: relative;
+    height: 16px;
+    background: var(--chronicle-paper);
+    border: 1px solid var(--chronicle-rule-soft);
+    border-radius: 2px;
+  }
+  .dumbbell-line {
+    position: absolute;
+    top: 7px;
+    height: 2px;
+  }
+  .dumbbell-dot-old, .dumbbell-dot-new {
+    position: absolute;
+    top: 4px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    transform: translateX(-50%);
+  }
+  .dumbbell-dot-old {
+    background: var(--chronicle-paper);
+    border: 2px solid var(--chronicle-sandstone);
+  }
+
+  /* Directional Delta Badges (Color-Blind Safe: Symbol + Hue) */
+  .delta-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 7px;
+    border-radius: var(--radius-xs);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .delta-drop {
+    color: var(--chronicle-cobalt);
+    background: var(--chronicle-cobalt-bg);
+  }
+  .delta-hike {
+    color: var(--chronicle-ochre);
+    background: var(--chronicle-ochre-bg);
+  }
+  .delta-flat {
+    color: var(--chronicle-sandstone);
+    background: var(--chronicle-well);
+  }
+
+  /* Tables */
+  .table-wrap {
+    overflow-x: auto;
+  }
+  table.chronicle-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+    font-variant-numeric: tabular-nums;
+  }
+  table.chronicle-table th {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--chronicle-sandstone);
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--chronicle-rule-heavy);
+    text-align: right;
+    white-space: nowrap;
+    background: var(--chronicle-paper);
+  }
+  table.chronicle-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--chronicle-rule);
+    text-align: right;
+    vertical-align: middle;
+  }
+  table.chronicle-table th:first-child,
+  table.chronicle-table td:first-child,
+  table.chronicle-table th.left,
+  table.chronicle-table td.left {
+    text-align: left;
+  }
+  table.chronicle-table tbody tr:hover {
+    background: var(--chronicle-hover);
+  }
+  table.chronicle-table tbody tr.selected-row {
+    background: var(--chronicle-cobalt-bg);
+  }
+
+  /* ==========================================================================
+     115-FIELD PROPERTY MONOGRAPH & CADASTRAL DOSSIER
+     ========================================================================== */
+  .monograph-header {
+    padding: var(--space-3);
+    background: var(--chronicle-paper);
+    border: 1px solid var(--chronicle-rule);
+    margin-bottom: var(--space-3);
+  }
+  .monograph-title-ar {
+    font-family: var(--font-sans);
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.4;
+    margin-top: 4px;
+  }
+  .monograph-addr-ar {
+    font-size: 12.5px;
+    color: var(--chronicle-walnut);
+    margin-top: 2px;
+  }
+  .spec-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    border-top: 1px solid var(--chronicle-rule);
+    border-left: 1px solid var(--chronicle-rule);
+    margin-bottom: var(--space-3);
+  }
+  .spec-cell {
+    padding: 8px 10px;
+    border-right: 1px solid var(--chronicle-rule);
+    border-bottom: 1px solid var(--chronicle-rule);
+    background: var(--chronicle-vellum);
+  }
+  .spec-cell .lbl {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--chronicle-sandstone);
+  }
+  .spec-cell .val {
+    font-family: var(--font-mono);
+    font-size: 13.5px;
+    font-weight: 700;
+    margin-top: 2px;
+    font-variant-numeric: tabular-nums;
+  }
+  .amenity-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-bottom: var(--space-3);
+  }
+  .tag-pill {
+    padding: 2px 8px;
+    border-radius: var(--radius-xs);
+    border: 1px solid var(--chronicle-rule);
+    background: var(--chronicle-paper);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--chronicle-walnut);
+  }
+  .tag-pill.verified {
+    color: var(--chronicle-emerald);
+    border-color: var(--chronicle-emerald);
+    background: var(--chronicle-emerald-bg);
+  }
+
+  /* Category Horizon Bar inside Analytics Table */
+  .horizon-bar-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 140px;
+  }
+  .horizon-bar {
+    flex: 1;
+    height: 8px;
+    background: var(--chronicle-well);
+    display: flex;
+    border-radius: 1px;
+    overflow: hidden;
+  }
+  .lollipop-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+  .lollipop-track {
+    width: 65px;
+    height: 4px;
+    background: var(--chronicle-well);
+    position: relative;
+    border-radius: 1px;
+  }
+  .lollipop-fill {
+    height: 100%;
+    background: var(--chronicle-terracotta);
+  }
+
+  /* ==========================================================================
+     57-CATEGORY CADASTRAL SWEEP MATRIX
+     ========================================================================== */
+  .cadastral-matrix {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+    gap: 8px 16px;
+  }
+  .cat-cell {
+    padding: 6px 8px;
+    border: 1px solid var(--chronicle-rule-soft);
+    background: var(--chronicle-paper);
+    font-size: 12px;
+  }
+  .cat-cell.active {
+    border: 1px solid var(--chronicle-terracotta);
+    border-left: 3px solid var(--chronicle-terracotta);
+    background: var(--chronicle-terracotta-bg);
+  }
+  .cat-cell-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 6px;
+    margin-bottom: 4px;
+  }
+  .cat-cell-bar {
+    height: 4px;
+    background: var(--chronicle-well);
+    overflow: hidden;
+  }
+  .cat-cell-bar > i {
+    display: block;
+    height: 100%;
+    background: var(--chronicle-ink);
+    transition: width 300ms var(--ease-out);
+  }
+  .cat-cell-bar > i.done { background: var(--chronicle-emerald); }
+  .cat-cell-bar > i.err { background: var(--chronicle-crimson); }
+
+  /* Code / Log Well */
+  .press-well {
+    background: var(--chronicle-well);
+    border: 1px solid var(--chronicle-rule);
+    padding: var(--space-3);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    line-height: 1.55;
+    max-height: 240px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    color: var(--chronicle-ink);
+  }
+
+  footer.colophon {
+    margin-top: var(--space-6);
+    padding-top: var(--space-3);
+    border-top: 2px solid var(--chronicle-rule-heavy);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--chronicle-sandstone);
+  }
+
+  a.editorial-link {
+    color: var(--chronicle-cobalt);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  /* Responsive Breakpoints */
+  @media (max-width: 1080px) {
+    .front-ledger { grid-template-columns: 1fr; }
+    .ledger-col { border-right: none; border-bottom: 1px solid var(--chronicle-rule); }
+    .workspace-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 640px) {
+    body { padding: var(--space-3); }
+    .spread-summary-strip { grid-template-columns: 1fr 1fr; }
+    .spec-grid { grid-template-columns: 1fr 1fr; }
+    .dumbbell-row { grid-template-columns: 110px 1fr 95px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <h1>AQAR Crawler v2</h1>
-    <span id="pill" class="pill stopped">STOPPED</span>
-    <span id="commitPill" class="muted" style="font-family:Consolas,monospace;font-size:12px"></span>
-    <span id="addr" class="muted"></span>
-    <div class="spacer"></div>
-    <button id="btnUpdate" class="btn" onclick="triggerUpdate()" title="Fetch origin/main and apply hot-reload or <1s binary handoff">Update (Git)</button>
-    <a class="btn" href="/api/export" target="_blank">Export CSV</a>
-    <button id="btnPause" class="btn warn" onclick="ctrl('pause')">Pause</button>
-    <button id="btnResume" class="btn primary" onclick="ctrl('resume')">Resume</button>
-    <button id="btnStop" class="btn danger" onclick="ctrl('stop')">Stop</button>
-    <button id="btnStart" class="btn primary" onclick="ctrl('start')">Start</button>
+<div class="broadsheet">
+
+  <!-- ========================================================================
+       MASTHEAD (BROADSHEET HEADER & EDITION CONTROLS)
+       ======================================================================== -->
+  <header class="masthead">
+    <div class="masthead-meta">
+      <div class="masthead-meta-left">
+        <span id="pill" class="stamp stopped"><span class="dot"></span><span id="pillText">STOPPED</span></span>
+        <span id="commitPill" class="num" style="font-weight:700;color:var(--chronicle-ink)">@local</span>
+        <span id="addr" class="num"></span>
+        <span id="iUpdate">Auto-Updater: standby</span>
+      </div>
+      <div class="masthead-meta-right">
+        <span id="iWindow">24/7 Continuous Watchdog</span>
+        <span>·</span>
+        <span id="iPace">Pace: -</span>
+        <span>·</span>
+        <button id="btnTheme" class="btn sm" onclick="toggleTheme()" title="Switch between Warm Newsprint (Day) and Obsidian Press-Room (Night)">☾ Night Edition</button>
+      </div>
+    </div>
+
+    <div class="masthead-main">
+      <div class="masthead-brand">
+        <h1>The AQAR Chronicle <span class="arabic-sub" dir="rtl">مرصد عقار السعودي</span></h1>
+        <p>Kingdom-Wide Real-Estate Cadastral Archive, Price-Spread Radar &amp; 115-Field Lossless (`AQZ1`) Observatory</p>
+      </div>
+      <div class="masthead-controls">
+        <button id="btnUpdate" class="btn cobalt" onclick="triggerUpdate()" title="Fetch origin/main and apply 0ms hot-reload or <1s binary handoff">↻ Pull &amp; Deploy (Git)</button>
+        <a class="btn" href="/api/export" target="_blank">↓ Export Archive CSV</a>
+        <button id="btnPause" class="btn" onclick="ctrl('pause')">Pause</button>
+        <button id="btnResume" class="btn" onclick="ctrl('resume')">Resume</button>
+        <button id="btnStop" class="btn danger" onclick="ctrl('stop')">Stop</button>
+        <button id="btnStart" class="btn accent" onclick="ctrl('start')">Start Crawl</button>
+      </div>
+    </div>
   </header>
 
-  <div id="errbox" class="errbox"></div>
+  <div id="errbox" class="notice-banner" role="status" aria-live="polite"></div>
 
-  <div class="cards">
-    <div class="card"><div class="lbl">Listings (db)</div><div class="val blue" id="cListings">-</div></div>
-    <div class="card"><div class="lbl">New (cycle)</div><div class="val green" id="cNew">-</div></div>
-    <div class="card"><div class="lbl">Updated (cycle)</div><div class="val yellow" id="cUpdated">-</div></div>
-    <div class="card"><div class="lbl">Removed (cycle)</div><div class="val" id="cRemoved">-</div></div>
-    <div class="card"><div class="lbl">Requests</div><div class="val" id="cRequests">-</div></div>
-    <div class="card"><div class="lbl">Pages</div><div class="val" id="cPages">-</div></div>
-    <div class="card"><div class="lbl">Seen (cycle)</div><div class="val" id="cSeen">-</div></div>
-    <div class="card"><div class="lbl">History rows</div><div class="val" id="cHistory">-</div></div>
-    <div class="card"><div class="lbl">Errors</div><div class="val red" id="cErrors">-</div></div>
-    <div class="card"><div class="lbl">DB size</div><div class="val" id="cDbsize">-</div></div>
-  </div>
-
-  <div class="panel">
-    <h2>Cycle & Watchdog Status</h2>
-    <div class="info-grid">
-      <div><span class="k">Cycle #</span> <b id="iCycle">-</b></div>
-      <div><span class="k">Started</span> <b id="iStarted">-</b></div>
-      <div><span class="k">Uptime</span> <b id="iUptime">-</b></div>
-      <div><span class="k">Next cycle in</span> <b id="iNext">-</b></div>
-      <div><span class="k">ETA (this cycle)</span> <b id="iEta">-</b></div>
-      <div><span class="k">Pace</span> <b id="iPace">-</b></div>
-      <div><span class="k">Page size</span> <b id="iPageSize">-</b></div>
-      <div><span class="k">Cycle hours</span> <b id="iCycleHours">-</b></div>
-      <div><span class="k">Crawl window</span> <b id="iWindow">-</b></div>
-      <div><span class="k">Categories</span> <b id="iCats">-</b></div>
-      <div><span class="k">Database</span> <b id="iDb">-</b></div>
-      <div><span class="k">Archive health</span> <b id="iArchiveHealth">-</b></div>
-      <div><span class="k">Auto-Updater</span> <b id="iUpdate">-</b></div>
-    </div>
-  </div>
-
-  <div class="panel">
-    <div class="panel-head">
-      <h2>Price-Drop & Change Radar <span class="muted" id="radarMeta"></span></h2>
-      <div style="display:flex;gap:8px">
-        <button id="btnRadarAll" class="btn sm primary" onclick="loadChanges(false)">All Updates</button>
-        <button id="btnRadarDrops" class="btn sm" onclick="loadChanges(true)">Price Drops Only</button>
+  <!-- ========================================================================
+       FRONT-PAGE LEDGER (3-COLUMN SOVEREIGN TELEMETRY RIBBON)
+       ======================================================================== -->
+  <section class="front-ledger" aria-label="Sovereign Archive & Cycle Telemetry">
+    <!-- Col 1: Sovereign Archive Composition -->
+    <div class="ledger-col">
+      <div>
+        <div class="kicker">I. Sovereign Cadastral Archive (<span id="iDb">AQAR.db</span>)</div>
+        <div class="hero-figure-row">
+          <span class="hero-figure" id="cListings">—</span>
+          <span class="hero-unit">indexed properties</span>
+        </div>
+        <div class="comp-bar-wrap">
+          <div class="comp-bar" title="Archive composition: Active vs Price-Revised vs Removed">
+            <div id="barActive" class="comp-seg-active" style="width:85%"></div>
+            <div id="barUpdated" class="comp-seg-updated" style="width:10%"></div>
+            <div id="barRemoved" class="comp-seg-removed" style="width:5%"></div>
+          </div>
+          <div class="comp-legend">
+            <span><i class="swatch" style="background:var(--chronicle-emerald)"></i>Active: <b id="legActive">—</b></span>
+            <span><i class="swatch" style="background:var(--chronicle-cobalt)"></i>Revised: <b id="legUpdated">—</b></span>
+            <span><i class="swatch" style="background:var(--chronicle-sandstone)"></i>Absorbed/Removed: <b id="legRemoved">—</b></span>
+          </div>
+        </div>
+      </div>
+      <div class="kv-list" style="margin-top:14px">
+        <div class="kv-item"><span class="k">Archive Footprint</span><span class="v" id="cDbsize">—</span></div>
+        <div class="kv-item"><span class="k">History Snapshots</span><span class="v" id="cHistory">—</span></div>
+        <div class="kv-item"><span class="k">AQZ1 Avg Blob</span><span class="v" id="iAvgBlob">—</span></div>
+        <div class="kv-item"><span class="k">Compression Ratio</span><span class="v" id="iCompRatio">~7.4× lossless</span></div>
       </div>
     </div>
-    <div style="overflow-x:auto">
-      <table>
-        <thead><tr>
-          <th>ID</th><th>Category</th><th style="text-align:left">Title / Address</th><th>Old Price</th><th>New Price</th><th>Delta</th><th>Changed</th><th>Updated At</th><th>Action</th>
-        </tr></thead>
-        <tbody id="radarRows"><tr><td colspan="9" class="muted">loading recent changes...</td></tr></tbody>
-      </table>
-    </div>
-  </div>
 
-  <div class="panel">
-    <div class="panel-head">
-      <h2>Listing Inspector & Full Lossless JSON Viewer</h2>
-      <div style="display:flex;gap:8px;align-items:center">
-        <input id="inspectId" class="input" type="number" placeholder="Enter Listing ID (e.g. 6347338)" style="width:220px" onkeydown="if(event.key==='Enter')inspectListing()"/>
-        <button class="btn sm primary" onclick="inspectListing()">Inspect</button>
-        <button id="btnToggleJson" class="btn sm" style="display:none" onclick="toggleFullJson()">Show Full 115-Field JSON</button>
+    <!-- Col 2: Active Cycle & In-Flight Sector Spotlight -->
+    <div class="ledger-col">
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <span class="kicker">II. Active Kingdom Sweep · Cycle #<span id="iCycle">—</span></span>
+          <span class="num" style="font-size:12px;color:var(--chronicle-terracotta);font-weight:700" id="iEta">ETA: —</span>
+        </div>
+        <div class="spotlight-box">
+          <div class="spotlight-head">
+            <span id="spotName">Awaiting active category...</span>
+            <span class="num" id="spotCounts">— / —</span>
+          </div>
+          <div class="ruler-bar"><i id="spotBar" style="width:0%"></i></div>
+          <div style="display:flex;justify-content:space-between;margin-top:5px;font-family:var(--font-mono);font-size:11px;color:var(--chronicle-sandstone)">
+            <span id="spotTag">Sector: —</span>
+            <span id="spotPct">0.0%</span>
+          </div>
+        </div>
+      </div>
+      <div class="kv-list" style="margin-top:12px">
+        <div class="kv-item"><span class="k">Cycle Started</span><span class="v" id="iStarted">—</span></div>
+        <div class="kv-item"><span class="k">Next Cycle</span><span class="v" id="iNext">—</span></div>
+        <div class="kv-item"><span class="k">Sectors Covered</span><span class="v" id="iCats">—</span></div>
+        <div class="kv-item"><span class="k">Page Batch</span><span class="v" id="iPageSize">—</span></div>
       </div>
     </div>
-    <div id="inspectOut" class="muted">Enter any listing ID above or click "Inspect" in the Radar table to view its full compressed snapshot and version diff timeline.</div>
-    <div id="inspectJsonBox" class="codebox" style="display:none;margin-top:10px;height:280px" dir="ltr"></div>
+
+    <!-- Col 3: Current Cycle Yield & Watchdog Continuity -->
+    <div class="ledger-col">
+      <div>
+        <div class="kicker">III. Current Cycle Yield &amp; Continuity</div>
+        <div class="kv-list" style="grid-template-columns:1fr;gap:6px;margin-top:10px">
+          <div class="kv-item"><span class="k">Listings Seen (Cycle)</span><span class="v" id="cSeen">—</span></div>
+          <div class="kv-item"><span class="k">Fresh Additions (+New)</span><span class="v" style="color:var(--chronicle-emerald)" id="cNew">—</span></div>
+          <div class="kv-item"><span class="k">Substantive Revisions</span><span class="v" style="color:var(--chronicle-cobalt)" id="cUpdated">—</span></div>
+          <div class="kv-item"><span class="k">Confirmed Removals</span><span class="v" id="cRemoved">—</span></div>
+          <div class="kv-item"><span class="k">GraphQL Requests / Pages</span><span class="v"><span id="cRequests">—</span> / <span id="cPages">—</span></span></div>
+          <div class="kv-item"><span class="k">Cycle Errors</span><span class="v" id="cErrors">0</span></div>
+          <div class="kv-item"><span class="k">Session Uptime / Swaps</span><span class="v" id="iUptime">—</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================================
+       MAIN TWO-COLUMN BROADSHEET WORKSPACE
+       Left: Price-Revision Chronicle & Diverging Spread Vectors
+       Right: 115-Field Cadastral Monograph & Category Valuation Horizon
+       ======================================================================== -->
+  <div class="workspace-grid">
+
+    <!-- LEFT COLUMN: PRICE-REVISION CHRONICLE -->
+    <div>
+      <section class="section-block" style="margin-bottom:0">
+        <div class="section-head">
+          <div>
+            <div class="kicker">Dispatch 01 · Live Price Discovery</div>
+            <h2>Price-Revision Chronicle &amp; Spread Vectors <span class="num" style="font-size:13px;color:var(--chronicle-sandstone)" id="radarMeta"></span></h2>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button id="btnRadarAll" class="btn sm accent" onclick="loadChanges(false)">All Revisions</button>
+            <button id="btnRadarDrops" class="btn sm" onclick="loadChanges(true)">▼ Price Cuts Only</button>
+          </div>
+        </div>
+
+        <!-- Statistical Summary Strip of Current Revisions -->
+        <div class="spread-summary-strip">
+          <div class="spread-stat">
+            <div class="kicker">▼ Price Cuts</div>
+            <div class="val" style="color:var(--chronicle-cobalt)" id="statCutsCount">—</div>
+          </div>
+          <div class="spread-stat">
+            <div class="kicker">▲ Price Hikes</div>
+            <div class="val" style="color:var(--chronicle-ochre)" id="statHikesCount">—</div>
+          </div>
+          <div class="spread-stat">
+            <div class="kicker">Deepest Cut</div>
+            <div class="val" style="color:var(--chronicle-cobalt)" id="statMaxCut">—</div>
+          </div>
+          <div class="spread-stat">
+            <div class="kicker">Avg Price Spread</div>
+            <div class="val" id="statAvgSpread">—</div>
+          </div>
+        </div>
+
+        <!-- Diverging Dumbbell Vector Plot -->
+        <div class="dumbbell-stage" id="dumbbellStage">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
+            <span class="kicker">Asking-to-Revised Price Spread Vectors (○ Prior SAR → ● Current SAR)</span>
+            <span class="num" style="font-size:11px;color:var(--chronicle-sandstone)">Click any vector to open Monograph</span>
+          </div>
+          <div id="dumbbellRows"><div style="color:var(--chronicle-sandstone);font-size:12px;padding:8px 0">Scanning archive for price revisions...</div></div>
+        </div>
+
+        <!-- Tabular Revision Ledger -->
+        <div class="table-wrap">
+          <table class="chronicle-table">
+            <thead>
+              <tr>
+                <th>Listing</th>
+                <th class="left">Sector</th>
+                <th class="left">Property &amp; District</th>
+                <th>Prior SAR</th>
+                <th>Current SAR</th>
+                <th>Spread (Δ%)</th>
+                <th class="left">Modified</th>
+                <th>Recorded</th>
+                <th>Dossier</th>
+              </tr>
+            </thead>
+            <tbody id="radarRows">
+              <tr><td colspan="9" class="left" style="color:var(--chronicle-sandstone)">Loading price-revision chronicle...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <!-- RIGHT COLUMN: PROPERTY MONOGRAPH + CATEGORY HORIZON -->
+    <div>
+      <!-- 115-Field Cadastral Monograph -->
+      <section class="section-block" id="monographSection">
+        <div class="section-head">
+          <div>
+            <div class="kicker">Dispatch 02 · Single-Parcel Deep Inspection</div>
+            <h2>115-Field Cadastral Property Monograph</h2>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <input id="inspectId" class="input" type="number" placeholder="Listing ID (e.g. 6347338)" style="width:175px;min-height:30px;padding:3px 8px" onkeydown="if(event.key==='Enter')inspectListing()"/>
+            <button class="btn sm accent" onclick="inspectListing()">Inspect</button>
+            <button id="btnToggleJson" class="btn sm" style="display:none" onclick="toggleFullJson()">Raw 115-Field JSON</button>
+          </div>
+        </div>
+        <div class="section-body">
+          <div id="inspectOut" style="color:var(--chronicle-sandstone);font-size:13px">
+            Select any property from the Price-Revision Chronicle on the left or enter a Listing ID above to decode its full 115-field GraphQL snapshot, compass street orientation, REGA/FAL license, buyer-lead velocity, and chronological version diff essay.
+          </div>
+          <div id="inspectJsonBox" class="press-well" style="display:none;margin-top:12px" dir="ltr"></div>
+        </div>
+      </section>
+
+      <!-- Category Valuation & Liquidity Horizon -->
+      <section class="section-block" style="margin-bottom:0">
+        <div class="section-head">
+          <div>
+            <div class="kicker">Dispatch 03 · Sector Liquidity &amp; Meter Valuation</div>
+            <h2>Kingdom Category Horizon (Top 20 Sectors)</h2>
+          </div>
+          <span class="section-sub">Active vs. Absorbed + Avg SAR/m²</span>
+        </div>
+        <div class="table-wrap">
+          <table class="chronicle-table">
+            <thead>
+              <tr>
+                <th class="left">Property Sector</th>
+                <th>Active</th>
+                <th>Absorbed</th>
+                <th class="left">Supply &amp; Turnover</th>
+                <th>Avg Price (SAR)</th>
+                <th>Avg SAR/m²</th>
+                <th>CSV</th>
+              </tr>
+            </thead>
+            <tbody id="analyticsRows">
+              <tr><td colspan="7" class="left" style="color:var(--chronicle-sandstone)">Computing sector valuations...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
   </div>
 
-  <div class="panel">
-    <h2>Category progress <span id="catCount" class="muted"></span></h2>
-    <div id="cats"></div>
+  <!-- ========================================================================
+       SECTION IV: 57-CATEGORY CADASTRAL SWEEP MATRIX
+       ======================================================================== -->
+  <section class="section-block">
+    <div class="section-head">
+      <div>
+        <div class="kicker">Dispatch 04 · Nationwide Pagination Matrix</div>
+        <h2>57-Sector Cadastral Sweep Index <span class="num" style="font-size:13px;color:var(--chronicle-sandstone)" id="catCount"></span></h2>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button id="btnCatAll" class="btn sm accent" onclick="setCatFilter('all')">All 57 Sectors</button>
+        <button id="btnCatRent" class="btn sm" onclick="setCatFilter('rent')">Rent (29)</button>
+        <button id="btnCatSale" class="btn sm" onclick="setCatFilter('sale')">Sale (28)</button>
+        <button id="btnCatActive" class="btn sm" onclick="setCatFilter('active')">In-Flight / Completed</button>
+      </div>
+    </div>
+    <div class="section-body">
+      <div id="cats" class="cadastral-matrix"></div>
+    </div>
+  </section>
+
+  <!-- ========================================================================
+       SECTION V: HISTORICAL CYCLE LEDGER & PRESS-ROOM LOG
+       ======================================================================== -->
+  <div class="workspace-grid" style="margin-bottom:0">
+    <section class="section-block" style="margin-bottom:0">
+      <div class="section-head">
+        <div>
+          <div class="kicker">Dispatch 05 · Archival Run Continuity</div>
+          <h2>Last 10 Crawl Cycles</h2>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="chronicle-table">
+          <thead>
+            <tr>
+              <th class="left">Cycle</th>
+              <th class="left">Status</th>
+              <th class="left">Started (UTC)</th>
+              <th>Req</th>
+              <th>Seen</th>
+              <th>+New</th>
+              <th>Revised</th>
+              <th>Removed</th>
+              <th>Errors</th>
+            </tr>
+          </thead>
+          <tbody id="runs"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section-block" style="margin-bottom:0">
+      <div class="section-head">
+        <div>
+          <div class="kicker">Dispatch 06 · Live Telemetry Stream</div>
+          <h2>Press-Room Wire (`logs/crawler.log`) <span class="num" style="font-size:12px;color:var(--chronicle-sandstone)" id="logMeta"></span></h2>
+        </div>
+      </div>
+      <div class="section-body">
+        <div id="logbox" class="press-well"></div>
+      </div>
+    </section>
   </div>
 
-  <div class="panel">
-    <h2>History (last 10 cycles)</h2>
-    <table>
-      <thead><tr>
-        <th>Cycle</th><th>Status</th><th>Started</th><th>Req</th><th>Seen</th><th>New</th><th>Updated</th><th>Removed</th><th>Errors</th>
-      </tr></thead>
-      <tbody id="runs"></tbody>
-    </table>
-  </div>
+  <footer class="colophon" id="foot">
+    <span>The AQAR Chronicle · Sovereign Cadastral Observatory</span>
+    <span id="footRight">Initializing telemetry...</span>
+  </footer>
 
-  <div class="panel">
-    <h2>Log <span class="muted" id="logMeta"></span></h2>
-    <div id="logbox"></div>
-  </div>
-
-  <footer id="foot"></footer>
 </div>
 
 <script>
@@ -170,6 +1134,32 @@ const $ = id => document.getElementById(id);
 let TOKEN = sessionStorage.getItem("aqar_token") || "";
 let radarDropsOnly = false;
 let currentFullJson = "";
+let currentInspectedId = 0;
+let autoInspectedOnce = false;
+let catFilterMode = "all";
+let lastLiveCategories = [];
+let lastActiveCatIdx = -1;
+
+// Theme Persistence (Default: Light "Warm Newsprint" Broadsheet)
+(function initTheme(){
+  const saved = localStorage.getItem("aqar_chronicle_theme") || "light";
+  document.documentElement.setAttribute("data-theme", saved);
+  updateThemeButton(saved);
+})();
+
+function toggleTheme(){
+  const cur = document.documentElement.getAttribute("data-theme") || "light";
+  const next = cur === "light" ? "dark" : "light";
+  document.documentElement.setAttribute("data-theme", next);
+  localStorage.setItem("aqar_chronicle_theme", next);
+  updateThemeButton(next);
+}
+
+function updateThemeButton(theme){
+  const btn = $("btnTheme");
+  if(!btn) return;
+  btn.textContent = theme === "light" ? "☾ Night Edition" : "☀ Day Paper";
+}
 
 async function api(path, opts){
   opts = opts || {};
@@ -178,7 +1168,7 @@ async function api(path, opts){
   }
   const r = await fetch(path, opts);
   if(r.status === 401){
-    TOKEN = prompt("This panel is protected. Enter the access token:") || "";
+    TOKEN = prompt("This observatory is protected. Enter X-Auth-Token:") || "";
     sessionStorage.setItem("aqar_token", TOKEN);
     if(TOKEN){
       opts.headers = Object.assign({}, opts.headers||{}, {"X-Auth-Token": TOKEN});
@@ -189,21 +1179,39 @@ async function api(path, opts){
 }
 
 function fmt(n){
-  return n==null ? "-" : Number(n).toLocaleString("en-US");
+  return (n === null || n === undefined || Number.isNaN(Number(n))) ? "—" : Number(n).toLocaleString("en-US");
+}
+function fmtCompactSAR(n){
+  n = Number(n);
+  if(!n || Number.isNaN(n)) return "—";
+  if(n >= 1e6) return (n/1e6).toFixed(2) + "M";
+  if(n >= 1e3) return (n/1e3).toFixed(0) + "K";
+  return n.toFixed(0);
 }
 function fmtDur(sec){
-  if(sec==null||sec<0) return "-";
+  if(sec==null||sec<0) return "—";
   sec=Math.floor(sec);
   const h=Math.floor(sec/3600), m=Math.floor(sec%3600/60), s=sec%60;
   if(h>0) return h+"h "+String(m).padStart(2,"0")+"m";
   return m+"m "+String(s).padStart(2,"0")+"s";
 }
 function fmtDB(mb){
-  return mb==null ? "-" : (mb>=1024 ? (mb/1024).toFixed(2)+" GB" : mb.toFixed(1)+" MB");
+  return mb==null ? "—" : (mb>=1024 ? (mb/1024).toFixed(2)+" GB" : mb.toFixed(1)+" MB");
 }
 function esc(s){
   return String(s??"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }
+
+// Domain Enums (from reverse-engineered AQAR v1/v2 protocol)
+const STREET_DIRS = {
+  1: "North (شمال)", 2: "East (شرق)", 3: "West (غرب)", 4: "South (جنوب)",
+  5: "North-East (شمال شرقي)", 6: "South-East (جنوب شرقي)",
+  7: "South-West (جنوب غربي)", 8: "North-West (شمال غربي)",
+  9: "3 Streets (ثلاث شوارع)", 10: "4 Streets (أربع شوارع)"
+};
+const RENT_PERIODS = {
+  1: "Daily (يومي)", 2: "Monthly (شهري)", 3: "Yearly (سنوي)"
+};
 
 async function refresh(){
   let s;
@@ -211,20 +1219,21 @@ async function refresh(){
     const r = await api("/api/status");
     s = await r.json();
   }catch(e){
-    $("errbox").textContent = "Panel API unreachable: "+e.message;
+    $("errbox").textContent = "Observatory API unreachable: " + e.message;
     $("errbox").style.display = "block";
     return;
   }
-  const live = s.live, db = s.db;
+  const live = s.live || {}, db = s.db || {};
   const running = s.running, paused = s.paused;
 
   const pill = $("pill");
-  pill.className = "pill " + (running ? (paused?"paused":(live.waiting?"paused":"running")) : "stopped");
-  pill.textContent = running ? (paused?"PAUSED":(live.waiting?"WAITING":"RUNNING")) : "STOPPED";
-  $("addr").textContent = s.address;
+  const stateCls = running ? (paused ? "paused" : (live.waiting ? "paused" : "running")) : "stopped";
+  pill.className = "stamp " + stateCls;
+  $("pillText").textContent = running ? (paused ? "PAUSED" : (live.waiting ? "WINDOW WAIT" : "LIVE SWEEP")) : "STOPPED";
+  $("addr").textContent = s.address || "";
 
   $("cListings").textContent = fmt(db.listings);
-  $("cNew").textContent = fmt(live.fresh);
+  $("cNew").textContent = "+" + fmt(live.fresh);
   $("cUpdated").textContent = fmt(live.updated);
   $("cRemoved").textContent = fmt(live.removed);
   $("cRequests").textContent = fmt(live.requests);
@@ -232,29 +1241,28 @@ async function refresh(){
   $("cSeen").textContent = fmt(live.seen);
   $("cHistory").textContent = fmt(db.history);
   $("cErrors").textContent = fmt(live.errors);
-  $("cErrors").className = "val " + (live.errors>0 ? "red" : "");
+  $("cErrors").style.color = live.errors > 0 ? "var(--chronicle-crimson)" : "var(--chronicle-ink)";
   $("cDbsize").textContent = fmtDB(db.size_mb);
 
-  $("iCycle").textContent = live.cycle || "-";
-  $("iStarted").textContent = live.cycle_started_at ? new Date(live.cycle_started_at).toLocaleString() : "-";
-  $("iUptime").textContent = s.uptime_sec ? fmtDur(s.uptime_sec) : "-";
-  $("iNext").textContent = (running && !live.waiting) ? "after cycle end" : (live.next_cycle_at ? fmtDur((new Date(live.next_cycle_at).getTime()-Date.now())/1000) : "-");
-  $("iEta").textContent = s.eta_seconds ? fmtDur(s.eta_seconds) : "-";
-  $("iPace").textContent = s.config.sleep_min_seconds+"-"+s.config.sleep_max_seconds+"s / page";
-  $("iPageSize").textContent = s.config.page_size;
-  $("iCycleHours").textContent = s.config.cycle_hours+"h";
-  $("iCats").textContent = s.config.categories_rent+" rent + "+s.config.categories_sale+" sale";
+  $("iCycle").textContent = live.cycle || "—";
+  $("iStarted").textContent = live.cycle_started_at ? new Date(live.cycle_started_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : "—";
+  $("iUptime").textContent = (s.uptime_sec ? fmtDur(s.uptime_sec) : "—") + (s.restarts_count ? " ("+s.restarts_count+" swaps)" : "");
+  $("iNext").textContent = (running && !live.waiting) ? "After cycle end" : (live.next_cycle_at ? fmtDur((new Date(live.next_cycle_at).getTime()-Date.now())/1000) : "—");
+  $("iEta").textContent = s.eta_seconds ? ("ETA " + fmtDur(s.eta_seconds)) : "ETA —";
+  $("iPace").textContent = "Pace: " + s.config.sleep_min_seconds + "–" + s.config.sleep_max_seconds + "s/page";
+  $("iPageSize").textContent = s.config.page_size + " / page";
+  $("iCats").textContent = s.config.categories_rent + " rent + " + s.config.categories_sale + " sale";
   $("iWindow").textContent = s.config.window_enabled
-    ? (String(s.config.window_start).padStart(2,"0")+":00-"+String(s.config.window_end).padStart(2,"0")+":00"+(s.config.in_window?" (OPEN)":""))
-    : "off (24/7 watchdog)";
-  $("iDb").textContent = db.path;
-  $("iDb").title = db.path;
+    ? ("Window: " + String(s.config.window_start).padStart(2,"0")+":00–"+String(s.config.window_end).padStart(2,"0")+":00"+(s.config.in_window?" (OPEN)":""))
+    : "24/7 Continuous Watchdog";
+  $("iDb").textContent = db.path || "AQAR.db";
+
   if(s.update){
     const u = s.update;
-    $("commitPill").textContent = u.current_commit ? ("@"+u.current_commit) : "";
-    let utxt = (u.current_commit || "local") + (u.up_to_date ? " (up to date)" : " (update available)");
+    $("commitPill").textContent = u.current_commit ? ("@" + u.current_commit) : "@local";
+    let utxt = "CI/CD: " + (u.up_to_date ? "up to date" : "update ready");
     if(u.last_mode && u.last_mode !== "none"){
-      utxt += " | last: " + u.last_mode;
+      utxt += " · " + u.last_mode;
       if(u.build_duration_ms) utxt += " (" + u.build_duration_ms + "ms build";
       if(u.handoff_duration_ms) utxt += ", " + u.handoff_duration_ms + "ms handoff";
       if(u.build_duration_ms) utxt += ")";
@@ -262,148 +1270,373 @@ async function refresh(){
     $("iUpdate").textContent = utxt;
   }
 
-  $("errbox").style.display = s.last_error ? "block" : "none";
-  $("errbox").textContent = s.last_error ? "Last crawler error: "+s.last_error : "";
+  if(s.last_error){
+    $("errbox").style.display = "block";
+    $("errbox").textContent = "Last crawler error: " + s.last_error;
+  }
 
-  // category progress
+  // Active Category Spotlight & 57-Sector Matrix
   const cats = live.categories || [];
-  $("catCount").textContent = cats.length+" categories";
-  let html = "";
-  let curGroup = "";
-  cats.forEach((c, i) => {
-    if(c.set !== curGroup){
-      curGroup = c.set;
-      html += '<div class="muted" style="margin:6px 0 2px;font-size:11px;text-transform:uppercase;letter-spacing:.5px">'+esc(c.set)+'</div>';
-    }
-    const pct = c.done ? 100 : (c.total>0 ? Math.min(100, c.from/c.total*100) : 0);
-    const state = c.errored ? "err" : (c.done ? "done" : "");
-    const active = (!s.watch && live.active_cat === i) ? ' class="cat active"' : ' class="cat"';
-    const counts = (c.done && !c.total) ? "—" : fmt(c.from)+" / "+fmt(c.total);
-    html += '<div'+active+'>'
-      + '<div class="tag">'+c.set+'/'+String(c.id).padStart(2,"0")+'</div>'
-      + '<div class="name" title="'+esc(c.name)+'">'+esc(c.name||"cat "+c.id)+'</div>'
-      + '<div class="bar"><i class="'+state+'" style="width:'+pct.toFixed(1)+'%"></i></div>'
-      + '<div class="pct">'+pct.toFixed(1)+'%</div>'
-      + '<div class="tag">'+counts+'</div>'
-      + '</div>';
-  });
-  $("cats").innerHTML = html || '<div class="muted">no categories yet</div>';
+  lastLiveCategories = cats;
+  lastActiveCatIdx = live.active_cat ?? -1;
+  const activeCat = cats[lastActiveCatIdx];
+  if(activeCat){
+    const pct = activeCat.done ? 100 : (activeCat.total > 0 ? Math.min(100, activeCat.from / activeCat.total * 100) : 0);
+    $("spotName").textContent = activeCat.name || ("Sector #" + activeCat.id);
+    $("spotCounts").textContent = fmt(activeCat.from) + " / " + fmt(activeCat.total);
+    $("spotBar").style.width = pct.toFixed(1) + "%";
+    $("spotTag").textContent = activeCat.set.toUpperCase() + " / ID " + String(activeCat.id).padStart(2, "0");
+    $("spotPct").textContent = pct.toFixed(1) + "%";
+  }
+  renderCategoriesMatrix();
 
-  // history
+  // Historical Cycle Runs
   let rows = "";
   (s.runs||[]).forEach(r => {
-    const st = r.status==="completed" ? '<span class="ok">completed</span>'
-             : r.status==="aborted" ? '<span class="bad">aborted</span>'
-             : '<span class="warn">'+esc(r.status)+'</span>';
-    rows += '<tr><td>#'+r.cycle+'</td><td>'+st+'</td><td>'+esc(r.started_at||"")+'</td>'
-      + '<td>'+fmt(r.requests)+'</td><td>'+fmt(r.seen)+'</td><td>+'+fmt(r.fresh)+'</td>'
-      + '<td>'+fmt(r.updated)+'</td><td>'+fmt(r.removed)+'</td><td>'+fmt(r.errors)+'</td></tr>';
+    const st = r.status==="completed" ? '<span style="color:var(--chronicle-emerald);font-weight:700">✓ completed</span>'
+             : r.status==="aborted" ? '<span style="color:var(--chronicle-crimson);font-weight:700">✕ aborted</span>'
+             : '<span style="color:var(--chronicle-terracotta);font-weight:700">● '+esc(r.status)+'</span>';
+    rows += '<tr>'
+      + '<td class="left num"><b>#'+r.cycle+'</b></td>'
+      + '<td class="left">'+st+'</td>'
+      + '<td class="left num">'+esc((r.started_at||"").slice(0,19).replace("T"," "))+'</td>'
+      + '<td class="num">'+fmt(r.requests)+'</td>'
+      + '<td class="num">'+fmt(r.seen)+'</td>'
+      + '<td class="num" style="color:var(--chronicle-emerald)">+'+fmt(r.fresh)+'</td>'
+      + '<td class="num" style="color:var(--chronicle-cobalt)">'+fmt(r.updated)+'</td>'
+      + '<td class="num">'+fmt(r.removed)+'</td>'
+      + '<td class="num">'+(r.errors>0?'<b style="color:var(--chronicle-crimson)">'+fmt(r.errors)+'</b>':'0')+'</td>'
+      + '</tr>';
   });
-  $("runs").innerHTML = rows || '<tr><td colspan="9" class="muted">no runs yet</td></tr>';
+  $("runs").innerHTML = rows || '<tr><td colspan="9" class="left" style="color:var(--chronicle-sandstone)">No crawl runs recorded yet.</td></tr>';
 
-  $("foot").textContent = "panel refreshed "+new Date().toLocaleTimeString()+" | heartbeat: "+
-    (s.heartbeat && s.heartbeat.last_update ? fmtDur(s.heartbeat.age_sec)+" ago" : "never")+
-    (s.heartbeat && s.heartbeat.stale ? " (STALE)" : "")+
-    (s.telegram && s.telegram.enabled ? " | telegram: "+(s.telegram.last_ok===true?"OK":(s.telegram.last_error||"no sends yet")) : "")+
-    (s.config.dry_run ? " | DRY-RUN" : "");
+  $("footRight").textContent = "Updated " + new Date().toLocaleTimeString()
+    + " · Heartbeat: " + (s.heartbeat && s.heartbeat.last_update ? fmtDur(s.heartbeat.age_sec) + " ago" : "never")
+    + (s.heartbeat && s.heartbeat.stale ? " (STALE)" : "")
+    + (s.telegram && s.telegram.enabled ? " · Telegram: " + (s.telegram.last_ok ? "OK" : (s.telegram.last_error || "standby")) : "");
+}
+
+function setCatFilter(mode){
+  catFilterMode = mode;
+  ["All","Rent","Sale","Active"].forEach(k => {
+    const btn = $("btnCat"+k);
+    if(btn) btn.className = "btn sm " + (mode === k.toLowerCase() ? "accent" : "");
+  });
+  renderCategoriesMatrix();
+}
+
+function renderCategoriesMatrix(){
+  const cats = lastLiveCategories || [];
+  const doneCount = cats.filter(c => c.done).length;
+  $("catCount").textContent = "(" + doneCount + " of " + cats.length + " sectors completed)";
+
+  const filtered = cats.map((c, idx) => ({c, idx})).filter(({c, idx}) => {
+    if(catFilterMode === "rent") return c.set === "rent";
+    if(catFilterMode === "sale") return c.set === "sale";
+    if(catFilterMode === "active") return c.done || c.from > 0 || idx === lastActiveCatIdx;
+    return true;
+  });
+
+  if(!filtered.length){
+    $("cats").innerHTML = '<div style="color:var(--chronicle-sandstone)">No sectors match this filter.</div>';
+    return;
+  }
+
+  let html = "";
+  filtered.forEach(({c, idx}) => {
+    const pct = c.done ? 100 : (c.total > 0 ? Math.min(100, c.from / c.total * 100) : 0);
+    const barCls = c.errored ? "err" : (c.done ? "done" : "");
+    const cellCls = idx === lastActiveCatIdx ? "cat-cell active" : "cat-cell";
+    const countTxt = (c.done && !c.total) ? "done" : (fmt(c.from) + " / " + fmt(c.total));
+    html += '<div class="'+cellCls+'">'
+      + '<div class="cat-cell-top">'
+      +   '<span style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(c.name)+'">'
+      +     '<span class="num" style="color:var(--chronicle-sandstone);margin-right:4px">'+esc(c.set.toUpperCase())+'/'+String(c.id).padStart(2,"0")+'</span>'
+      +     esc(c.name || ("Sector "+c.id))
+      +   '</span>'
+      +   '<span class="num" style="font-size:11px;color:var(--chronicle-walnut)">'+countTxt+' ('+pct.toFixed(0)+'%)</span>'
+      + '</div>'
+      + '<div class="cat-cell-bar"><i class="'+barCls+'" style="width:'+pct.toFixed(1)+'%"></i></div>'
+      + '</div>';
+  });
+  $("cats").innerHTML = html;
 }
 
 async function loadAnalytics(){
   try{
     const r = await api("/api/analytics");
     const j = await r.json();
-    if(j.ok && j.analytics){
-      const a = j.analytics;
-      $("iArchiveHealth").textContent = fmt(a.active_listings)+" active / "+fmt(a.removed_listings)+" removed (avg "+a.avg_blob_bytes+"B/blob)";
+    if(!j.ok || !j.analytics) return;
+    const a = j.analytics;
+
+    const total = Math.max(1, a.total_listings || 1);
+    const actPct = Math.max(0, Math.min(100, (a.active_listings / total) * 100));
+    const updPct = Math.max(0, Math.min(100 - actPct, (a.updated_listings / total) * 100));
+    const remPct = Math.max(0, 100 - actPct - updPct);
+
+    $("barActive").style.width = actPct.toFixed(1) + "%";
+    $("barUpdated").style.width = updPct.toFixed(1) + "%";
+    $("barRemoved").style.width = remPct.toFixed(1) + "%";
+
+    $("legActive").textContent = fmt(a.active_listings);
+    $("legUpdated").textContent = fmt(a.updated_listings);
+    $("legRemoved").textContent = fmt(a.removed_listings);
+    $("iAvgBlob").textContent = fmt(a.avg_blob_bytes) + " B / listing";
+
+    const cats = a.categories || [];
+    if(!cats.length){
+      $("analyticsRows").innerHTML = '<tr><td colspan="7" class="left" style="color:var(--chronicle-sandstone)">No category analytics available yet.</td></tr>';
+      return;
     }
+    const maxMeter = Math.max(1, ...cats.map(c => c.avg_meter || 0));
+    let h = "";
+    cats.forEach(c => {
+      const sumCat = Math.max(1, (c.active || 0) + (c.removed || 0));
+      const actShare = ((c.active || 0) / sumCat) * 100;
+      const turnoverPct = ((c.removed || 0) / sumCat) * 100;
+      const meterPct = Math.min(100, ((c.avg_meter || 0) / maxMeter) * 100);
+      h += '<tr>'
+        + '<td class="left"><b>'+esc(c.category_name || ("Sector #"+c.category_id))+'</b> <span class="num" style="color:var(--chronicle-sandstone);font-size:11px">#'+c.category_id+'</span></td>'
+        + '<td class="num">'+fmt(c.active)+'</td>'
+        + '<td class="num" style="color:var(--chronicle-sandstone)">'+fmt(c.removed)+'</td>'
+        + '<td class="left">'
+        +   '<div class="horizon-bar-wrap">'
+        +     '<div class="horizon-bar" title="Active '+actShare.toFixed(1)+'% vs Absorbed '+turnoverPct.toFixed(1)+'%">'
+        +       '<div style="width:'+actShare.toFixed(1)+'%;background:var(--chronicle-emerald)"></div>'
+        +       '<div style="width:'+turnoverPct.toFixed(1)+'%;background:var(--chronicle-sandstone);opacity:0.55"></div>'
+        +     '</div>'
+        +     '<span class="num" style="font-size:11px;color:var(--chronicle-sandstone);width:42px;text-align:right">'+turnoverPct.toFixed(0)+'% rem</span>'
+        +   '</div>'
+        + '</td>'
+        + '<td class="num"><b>'+fmt(Math.round(c.avg_price || 0))+'</b></td>'
+        + '<td class="num">'
+        +   '<div class="lollipop-wrap">'
+        +     '<span>'+(c.avg_meter > 0 ? fmt(Math.round(c.avg_meter)) : "—")+'</span>'
+        +     '<div class="lollipop-track"><div class="lollipop-fill" style="width:'+meterPct.toFixed(1)+'%"></div></div>'
+        +   '</div>'
+        + '</td>'
+        + '<td><a class="btn sm" href="/api/export?category='+c.category_id+'" target="_blank">CSV</a></td>'
+        + '</tr>';
+    });
+    $("analyticsRows").innerHTML = h;
   }catch(e){}
 }
 
 async function loadChanges(onlyDrops){
   if(typeof onlyDrops === "boolean") radarDropsOnly = onlyDrops;
-  $("btnRadarAll").className = "btn sm " + (!radarDropsOnly ? "primary" : "");
-  $("btnRadarDrops").className = "btn sm " + (radarDropsOnly ? "primary" : "");
+  $("btnRadarAll").className = "btn sm " + (!radarDropsOnly ? "accent" : "");
+  $("btnRadarDrops").className = "btn sm " + (radarDropsOnly ? "accent" : "");
   try{
-    const r = await api("/api/changes?limit=20&drops="+(radarDropsOnly?"1":"0"));
+    const r = await api("/api/changes?limit=35&drops="+(radarDropsOnly?"1":"0"));
     const j = await r.json();
     const items = j.items || [];
-    $("radarMeta").textContent = "("+items.length+" shown)";
+    $("radarMeta").textContent = "(" + items.length + " dispatches)";
+
+    // Compute live spread statistics
+    let cuts = 0, hikes = 0, deepestCutPct = 0, sumPct = 0, pctCount = 0;
+    items.forEach(it => {
+      const d = it.price_delta || 0;
+      if(d < 0){
+        cuts++;
+        if(it.price_pct < deepestCutPct) deepestCutPct = it.price_pct;
+      } else if(d > 0){
+        hikes++;
+      }
+      if(d !== 0 && it.price_pct){
+        sumPct += it.price_pct;
+        pctCount++;
+      }
+    });
+    $("statCutsCount").textContent = cuts + " listings";
+    $("statHikesCount").textContent = hikes + " listings";
+    $("statMaxCut").textContent = deepestCutPct < 0 ? ("▼ " + deepestCutPct.toFixed(1) + "%") : "—";
+    const avgPct = pctCount > 0 ? (sumPct / pctCount) : 0;
+    $("statAvgSpread").textContent = pctCount > 0 ? ((avgPct > 0 ? "▲ +" : (avgPct < 0 ? "▼ " : "")) + avgPct.toFixed(1) + "%") : "0.0%";
+
+    // Auto-inspect the first interesting listing once on initial load so the Monograph is never blank
+    if(!autoInspectedOnce && items.length > 0){
+      autoInspectedOnce = true;
+      inspectById(items[0].id, false);
+    }
+
+    // Render Diverging Dumbbell Vectors for top price-changed items
+    const priceChanged = items.filter(it => it.old_price > 0 && it.new_price > 0 && it.price_delta !== 0).slice(0, 8);
+    if(priceChanged.length > 0){
+      const allPrices = priceChanged.flatMap(it => [it.old_price, it.new_price]);
+      const minP = Math.min(...allPrices) * 0.92;
+      const maxP = Math.max(...allPrices) * 1.05;
+      const span = Math.max(1, maxP - minP);
+
+      let dh = "";
+      priceChanged.forEach(it => {
+        const x1 = Math.max(3, Math.min(97, ((it.old_price - minP) / span) * 100));
+        const x2 = Math.max(3, Math.min(97, ((it.new_price - minP) / span) * 100));
+        const left = Math.min(x1, x2);
+        const width = Math.max(1.5, Math.abs(x2 - x1));
+        const isDrop = it.price_delta < 0;
+        const color = isDrop ? "var(--chronicle-cobalt)" : "var(--chronicle-ochre)";
+        const badgeCls = isDrop ? "delta-badge delta-drop" : "delta-badge delta-hike";
+        const sym = isDrop ? "▼" : "▲";
+        dh += '<div class="dumbbell-row" onclick="inspectById('+it.id+', true)" title="Click to inspect #'+it.id+': '+esc(it.title)+'">'
+          + '<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+          +   '<b class="num">#'+it.id+'</b> <span style="color:var(--chronicle-sandstone)">'+esc(it.category_name||"")+'</span>'
+          + '</div>'
+          + '<div class="dumbbell-track">'
+          +   '<div class="dumbbell-line" style="left:'+left.toFixed(1)+'%;width:'+width.toFixed(1)+'%;background:'+color+'"></div>'
+          +   '<div class="dumbbell-dot-old" style="left:'+x1.toFixed(1)+'%" title="Prior: '+fmt(it.old_price)+' SAR"></div>'
+          +   '<div class="dumbbell-dot-new" style="left:'+x2.toFixed(1)+'%;background:'+color+'" title="Current: '+fmt(it.new_price)+' SAR"></div>'
+          + '</div>'
+          + '<div style="text-align:right">'
+          +   '<span class="'+badgeCls+'">'+sym+' '+(it.price_pct>0?"+":"")+it.price_pct.toFixed(1)+'%</span>'
+          + '</div>'
+          + '</div>';
+      });
+      $("dumbbellRows").innerHTML = dh;
+    } else {
+      $("dumbbellRows").innerHTML = '<div style="color:var(--chronicle-sandstone);font-size:12px;padding:4px 0">Recent revisions modified non-price attributes (description, status, or refresh metadata).</div>';
+    }
+
     if(!items.length){
-      $("radarRows").innerHTML = '<tr><td colspan="9" class="muted">No matching changes found.</td></tr>';
+      $("radarRows").innerHTML = '<tr><td colspan="9" class="left" style="color:var(--chronicle-sandstone)">No matching revisions found in archive yet.</td></tr>';
       return;
     }
+
     let h = "";
     items.forEach(it => {
       const d = it.price_delta || 0;
-      const dCls = d < 0 ? "ok" : (d > 0 ? "bad" : "muted");
-      const dTxt = d === 0 ? "—" : (d > 0 ? "+"+fmt(d) : fmt(d)) + " (" + (d>0?"+":"") + it.price_pct.toFixed(1) + "%)";
-      const link = it.url ? '<a class="link" href="'+esc(it.url)+'" target="_blank">#'+it.id+'</a>' : '#'+it.id;
-      const loc = esc(it.title || it.address || "-").slice(0, 48);
-      h += '<tr>'
-        + '<td>'+link+'</td>'
-        + '<td>'+esc(it.category_name || ("cat "+it.category))+'</td>'
-        + '<td style="text-align:left" title="'+esc(it.address)+'">'+loc+'</td>'
-        + '<td>'+fmt(it.old_price)+'</td>'
-        + '<td><b>'+fmt(it.new_price)+'</b></td>'
-        + '<td class="'+dCls+'">'+dTxt+'</td>'
-        + '<td>'+esc((it.changed_fields||[]).join(", "))+'</td>'
-        + '<td>'+esc((it.changed_at||"").slice(0,19).replace("T"," "))+'</td>'
-        + '<td><button class="btn sm" onclick="inspectById('+it.id+')">Inspect</button></td>'
+      const badgeCls = d < 0 ? "delta-badge delta-drop" : (d > 0 ? "delta-badge delta-hike" : "delta-badge delta-flat");
+      const sym = d < 0 ? "▼ " : (d > 0 ? "▲ +" : "◆ ");
+      const dTxt = d === 0 ? "◆ meta/text" : (sym + it.price_pct.toFixed(1) + "% (" + (d>0?"+":"") + fmtCompactSAR(d) + ")");
+      const link = it.url ? '<a class="editorial-link num" href="'+esc(it.url)+'" target="_blank">#'+it.id+'</a>' : '<span class="num">#'+it.id+'</span>';
+      const loc = esc(it.title || it.address || "—").slice(0, 46);
+      const rowCls = it.id === currentInspectedId ? ' class="selected-row"' : '';
+      h += '<tr'+rowCls+'>'
+        + '<td><b>'+link+'</b></td>'
+        + '<td class="left">'+esc(it.category_name || ("Sector "+it.category))+'</td>'
+        + '<td class="left" dir="auto" title="'+esc(it.address)+'">'+loc+'</td>'
+        + '<td class="num" style="color:var(--chronicle-sandstone)">'+fmt(it.old_price)+'</td>'
+        + '<td class="num"><b>'+fmt(it.new_price)+'</b></td>'
+        + '<td><span class="'+badgeCls+'">'+dTxt+'</span></td>'
+        + '<td class="left"><span class="tag-pill">'+esc((it.changed_fields||[]).join(", ")||"snapshot")+'</span></td>'
+        + '<td class="num" style="font-size:11.5px;color:var(--chronicle-sandstone)">'+esc((it.changed_at||"").slice(5,16).replace("T"," "))+'</td>'
+        + '<td><button class="btn sm" onclick="inspectById('+it.id+', true)">Monograph →</button></td>'
         + '</tr>';
     });
     $("radarRows").innerHTML = h;
   }catch(e){}
 }
 
-function inspectById(id){
+function inspectById(id, scrollIfMobile){
   $("inspectId").value = id;
-  inspectListing();
+  inspectListing(scrollIfMobile);
 }
 
-async function inspectListing(){
-  const id = $("inspectId").value.trim();
+async function inspectListing(scrollIfMobile){
+  const id = Number($("inspectId").value.trim());
   if(!id) return;
-  $("inspectOut").textContent = "Loading listing #"+id+"...";
+  currentInspectedId = id;
+  $("inspectOut").innerHTML = '<div class="num" style="color:var(--chronicle-sandstone)">Decoding 115-field AQZ1 Cadastral Monograph for Listing #' + id + '...</div>';
   $("inspectJsonBox").style.display = "none";
   $("btnToggleJson").style.display = "none";
+
   try{
-    const r = await api("/api/listing?id="+encodeURIComponent(id));
+    const r = await api("/api/listing?id=" + encodeURIComponent(id));
     const j = await r.json();
     if(!j.ok){
-      $("inspectOut").innerHTML = '<span class="bad">'+esc(j.message||"Not found")+'</span>';
+      $("inspectOut").innerHTML = '<div style="color:var(--chronicle-crimson);font-weight:600">✕ ' + esc(j.message || "Listing not found in archive.") + '</div>';
       return;
     }
     const sum = j.summary || {};
     currentFullJson = sum.full_json || "";
+    let parsed = {};
     if(currentFullJson){
-      try { currentFullJson = JSON.stringify(JSON.parse(currentFullJson), null, 2); } catch(e){}
-      $("btnToggleJson").style.display = "inline-block";
-      $("btnToggleJson").textContent = "Show Full 115-Field JSON ("+fmt(sum.raw_bytes)+" B)";
+      try {
+        parsed = JSON.parse(currentFullJson);
+        currentFullJson = JSON.stringify(parsed, null, 2);
+      } catch(e){}
+      $("btnToggleJson").style.display = "inline-flex";
+      $("btnToggleJson").textContent = "Raw 115-Field JSON (" + fmt(sum.raw_bytes) + " B)";
     }
-    const ratio = sum.compressed_bytes > 0 ? (sum.raw_bytes / sum.compressed_bytes).toFixed(1)+"x" : "-";
-    let h = '<div class="info-grid" style="margin-bottom:10px">'
-      + '<div><span class="k">Listing ID</span> <b>#'+sum.id+'</b> '+(sum.url?'<a class="link" href="'+esc(sum.url)+'" target="_blank">[aqar.fm]</a>':'')+'</div>'
-      + '<div><span class="k">Category</span> <b>'+esc(sum.category_name||sum.category)+'</b></div>'
-      + '<div><span class="k">Price</span> <b>'+fmt(sum.price)+' SAR</b></div>'
-      + '<div><span class="k">Area / Beds</span> <b>'+fmt(sum.area)+' m² / '+sum.beds+' beds</b></div>'
-      + '<div><span class="k">Compression</span> <b>'+fmt(sum.compressed_bytes)+' B → '+fmt(sum.raw_bytes)+' B ('+ratio+')</b></div>'
-      + '<div><span class="k">Status</span> <b>'+(sum.removed_at ? '<span class="bad">Removed ('+esc(sum.removed_at.slice(0,10))+')</span>' : '<span class="ok">Active (cycle '+sum.seen_cycle+')</span>')+'</b></div>'
+
+    const ratio = sum.compressed_bytes > 0 ? (sum.raw_bytes / sum.compressed_bytes).toFixed(1) + "×" : "—";
+    const user = parsed.user || {};
+    const streetDir = STREET_DIRS[Number(parsed.street_direction)] || (parsed.street_direction ? ("Dir #" + parsed.street_direction) : "—");
+    const rentPeriod = RENT_PERIODS[Number(parsed.rent_period)] || (parsed.rent_period ? ("Period #" + parsed.rent_period) : "Sale / Freehold");
+    const streetWidth = parsed.street_width ? (parsed.street_width + " m") : "—";
+    const propAge = parsed.age !== undefined && parsed.age !== null ? (parsed.age === 0 ? "Brand New (جديد)" : parsed.age + " yrs") : "—";
+    const whatsappLeads = parsed.whatsapp_requested_count ?? 0;
+
+    // Build Amenity & Regulatory Verification Pills from the 115-field payload
+    const pills = [];
+    if(parsed.verified || user.verified) pills.push('<span class="tag-pill verified">✓ Verified Listing</span>');
+    if(parsed.iam_verified || user.iam_verified) pills.push('<span class="tag-pill verified">✓ Nafath / IAM Verified</span>');
+    if(parsed.deed_verified) pills.push('<span class="tag-pill verified">✓ Title Deed Verified</span>');
+    if(parsed.rega_licensed || parsed.fal_license_number || user.fal_license_number) {
+      pills.push('<span class="tag-pill verified">✓ REGA FAL: '+esc(parsed.fal_license_number || user.fal_license_number || "Licensed")+'</span>');
+    }
+    if(parsed.ad_license_number) pills.push('<span class="tag-pill">Ad License: '+esc(parsed.ad_license_number)+'</span>');
+    if(parsed.furnished) pills.push('<span class="tag-pill">Furnished (مفروش)</span>');
+    if(parsed.pool) pills.push('<span class="tag-pill">Pool (مسبح)</span>');
+    if(parsed.elevator) pills.push('<span class="tag-pill">Elevator (مصعد)</span>');
+    if(parsed.duplex) pills.push('<span class="tag-pill">Duplex (دوبلكس)</span>');
+    if(parsed.basement) pills.push('<span class="tag-pill">Basement (قبو)</span>');
+    if(parsed.maid) pills.push('<span class="tag-pill">Maid Room</span>');
+    if(parsed.driver) pills.push('<span class="tag-pill">Driver Room</span>');
+    if(parsed.car_entrance) pills.push('<span class="tag-pill">Car Entrance (مدخل سيارة)</span>');
+    if(parsed.ac) pills.push('<span class="tag-pill">Central/Split AC</span>');
+
+    let h = '<div class="monograph-header">'
+      + '<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">'
+      +   '<span class="kicker">Parcel Monograph #' + sum.id + ' · ' + esc(sum.category_name || ("Sector " + sum.category)) + '</span>'
+      +   '<span class="num" style="font-size:11.5px">'
+      +     (sum.removed_at ? '<b style="color:var(--chronicle-crimson)">● REMOVED ('+esc(sum.removed_at.slice(0,10))+')</b>' : '<b style="color:var(--chronicle-emerald)">● ACTIVE (Cycle #'+sum.seen_cycle+')</b>')
+      +     ' · <span class="tag-pill" title="AQZ1 preset-dictionary DEFLATE compression">AQZ1: '+fmt(sum.compressed_bytes)+' B → '+fmt(sum.raw_bytes)+' B ('+ratio+')</span>'
+      +     (sum.url ? ' · <a class="editorial-link" href="'+esc(sum.url)+'" target="_blank">Open on aqar.fm ↗</a>' : '')
+      +   '</span>'
+      + '</div>'
+      + '<div class="monograph-title-ar" dir="auto">' + esc(sum.title || parsed.title || parsed.user_title || ("Listing #" + sum.id)) + '</div>'
+      + '<div class="monograph-addr-ar" dir="auto">' + esc(sum.address || parsed.address || "Kingdom of Saudi Arabia") + '</div>'
       + '</div>';
-    if(sum.title || sum.address){
-      h += '<div style="margin-bottom:10px;font-size:13px"><b>'+esc(sum.title)+'</b> — <span class="muted">'+esc(sum.address)+'</span></div>';
+
+    h += '<div class="spec-grid">'
+      + '<div class="spec-cell"><div class="lbl">Asking Price</div><div class="val" style="color:var(--chronicle-terracotta)">' + fmt(sum.price) + ' SAR</div></div>'
+      + '<div class="spec-cell"><div class="lbl">Meter Valuation</div><div class="val">' + (sum.meter_price ? fmt(Math.round(sum.meter_price)) + ' SAR/m²' : '—') + '</div></div>'
+      + '<div class="spec-cell"><div class="lbl">Plot / Floor Area</div><div class="val">' + (sum.area ? fmt(sum.area) + ' m²' : '—') + '</div></div>'
+      + '<div class="spec-cell"><div class="lbl">Tenure / Period</div><div class="val">' + esc(rentPeriod) + '</div></div>'
+      + '<div class="spec-cell"><div class="lbl">Facade Orientation</div><div class="val">' + esc(streetDir) + '</div></div>'
+      + '<div class="spec-cell"><div class="lbl">Street Width &amp; Age</div><div class="val">' + esc(streetWidth) + ' · ' + esc(propAge) + '</div></div>'
+      + '<div class="spec-cell"><div class="lbl">Beds / Rooms / Baths</div><div class="val">' + (sum.beds||0) + ' bd · ' + (sum.rooms||0) + ' rm · ' + (parsed.wc||0) + ' wc</div></div>'
+      + '<div class="spec-cell"><div class="lbl">WhatsApp Lead Velocity</div><div class="val">' + fmt(whatsappLeads) + ' inquiries</div></div>'
+      + '<div class="spec-cell"><div class="lbl">Broker / Advertiser</div><div class="val" dir="auto" style="font-family:var(--font-sans);font-size:12.5px">' + esc(user.name || "Direct Owner") + '</div></div>'
+      + '</div>';
+
+    if(pills.length){
+      h += '<div class="amenity-tags">' + pills.join("") + '</div>';
     }
-    h += '<table><thead><tr><th>Timestamp</th><th>Event</th><th style="text-align:left">Field-Level Diffs</th></tr></thead><tbody>';
+
+    h += '<div class="kicker" style="margin-bottom:6px">Chronological Version Diff Essay (' + (j.rows||[]).length + ' snapshots)</div>';
+    h += '<div class="table-wrap"><table class="chronicle-table"><thead><tr><th class="left">Recorded UTC</th><th class="left">Event</th><th class="left">Field-Level Revisions (Before → After)</th></tr></thead><tbody>';
     (j.rows||[]).forEach(rw => {
-      let dstr = "—";
-      if(rw.diff && rw.diff.length){
-        dstr = rw.diff.map(d => '<b>'+esc(d.field)+'</b>: '+esc(JSON.stringify(d.from))+' → <span class="ok">'+esc(JSON.stringify(d.to))+'</span>').join(" &nbsp;|&nbsp; ");
+      let dstr = '<span style="color:var(--chronicle-sandstone)">Initial baseline snapshot archived (115 fields)</span>';
+      if(rw.change_type === "removed"){
+        dstr = '<span style="color:var(--chronicle-crimson)">Listing absent past grace period — marked removed</span>';
+      } else if(rw.diff && rw.diff.length){
+        dstr = rw.diff.map(d => '<b>'+esc(d.field)+'</b>: <span style="color:var(--chronicle-sandstone)">'+esc(JSON.stringify(d.from))+'</span> → <span style="color:var(--chronicle-cobalt);font-weight:700">'+esc(JSON.stringify(d.to))+'</span>').join(" &nbsp;·&nbsp; ");
       }
-      h += '<tr><td>'+esc(rw.fetched_at)+'</td><td>'+esc(rw.change_type)+'</td><td style="text-align:left;white-space:normal">'+dstr+'</td></tr>';
+      h += '<tr>'
+        + '<td class="left num" style="font-size:11.5px">'+esc((rw.fetched_at||"").slice(0,19).replace("T"," "))+'</td>'
+        + '<td class="left"><span class="tag-pill">'+esc(rw.change_type)+'</span></td>'
+        + '<td class="left" style="white-space:normal">'+dstr+'</td>'
+        + '</tr>';
     });
-    h += '</tbody></table>';
+    h += '</tbody></table></div>';
+
     $("inspectOut").innerHTML = h;
+    if(scrollIfMobile && window.innerWidth < 1080){
+      $("monographSection").scrollIntoView({behavior: "smooth"});
+    }
   }catch(e){
-    $("inspectOut").innerHTML = '<span class="bad">Failed: '+esc(e.message)+'</span>';
+    $("inspectOut").innerHTML = '<div style="color:var(--chronicle-crimson)">Failed to load Monograph: ' + esc(e.message) + '</div>';
   }
 }
 
@@ -412,10 +1645,10 @@ function toggleFullJson(){
   if(box.style.display === "none"){
     box.textContent = currentFullJson;
     box.style.display = "block";
-    $("btnToggleJson").textContent = "Hide Full JSON";
+    $("btnToggleJson").textContent = "Hide Raw JSON";
   } else {
     box.style.display = "none";
-    $("btnToggleJson").textContent = "Show Full 115-Field JSON";
+    $("btnToggleJson").textContent = "Raw 115-Field JSON";
   }
 }
 
@@ -426,49 +1659,49 @@ async function loadLog(){
     const box = $("logbox");
     const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
     box.textContent = (j.lines||[]).join("\n");
-    $("logMeta").textContent = (j.lines||[]).length+" lines";
+    $("logMeta").textContent = "(" + (j.lines||[]).length + " lines)";
     if(atBottom) box.scrollTop = box.scrollHeight;
   }catch(e){}
 }
 
 async function ctrl(action){
-  const btn = action==="start" ? $("btnStart") : action==="stop" ? $("btnStop"): action==="pause" ? $("btnPause") : $("btnResume");
-  btn.disabled = true;
+  const btn = action==="start" ? $("btnStart") : action==="stop" ? $("btnStop") : action==="pause" ? $("btnPause") : $("btnResume");
+  if(btn) btn.disabled = true;
   try{
     const r = await api("/api/control", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({action})});
     const j = await r.json();
-    $("errbox").textContent = j.ok ? "✓ "+j.message : "✗ "+j.message;
+    $("errbox").textContent = (j.ok ? "✓ " : "✕ ") + j.message;
     $("errbox").style.display = "block";
   }catch(e){
-    $("errbox").textContent = "control failed: "+e.message;
+    $("errbox").textContent = "Control command failed: " + e.message;
     $("errbox").style.display = "block";
   }
-  btn.disabled = false;
+  if(btn) btn.disabled = false;
   setTimeout(refresh, 300);
 }
 
 async function triggerUpdate(){
   const btn = $("btnUpdate");
   btn.disabled = true;
-  btn.textContent = "Updating...";
+  btn.textContent = "↻ Deploying...";
   try{
     const r = await api("/api/update", {method:"POST"});
     const j = await r.json();
     if(j.last_error){
-      $("errbox").textContent = "✗ Update failed: " + j.last_error;
+      $("errbox").textContent = "✕ Update failed: " + j.last_error;
     } else if(j.restart_pending){
-      $("errbox").textContent = "✓ Binary compiled ("+j.build_duration_ms+"ms) — executing <1s hot handoff to @"+j.current_commit+"...";
+      $("errbox").textContent = "✓ Binary compiled (" + j.build_duration_ms + "ms) — executing <1s hot handoff to @" + j.current_commit + "...";
     } else {
-      $("errbox").textContent = "✓ Update check complete: mode="+(j.last_mode||"none")+" @"+(j.current_commit||"");
+      $("errbox").textContent = "✓ Update check complete: mode=" + (j.last_mode || "none") + " @" + (j.current_commit || "");
     }
     $("errbox").style.display = "block";
   }catch(e){
-    $("errbox").textContent = "Update request failed: "+e.message;
+    $("errbox").textContent = "Update request failed: " + e.message;
     $("errbox").style.display = "block";
   }
   btn.disabled = false;
-  btn.textContent = "Update (Git)";
-  setTimeout(refresh, 600);
+  btn.textContent = "↻ Pull & Deploy (Git)";
+  setTimeout(refresh, 700);
 }
 
 refresh();
