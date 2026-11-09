@@ -117,6 +117,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("committing migration %d: %w", version, err)
 		}
+		_, _ = s.db.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)")
 	}
 	return nil
 }
