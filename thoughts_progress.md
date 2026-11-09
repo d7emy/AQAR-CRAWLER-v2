@@ -160,3 +160,19 @@ Reverse-engineered the AQAR (عقار) iOS app API from a Burp Suite capture (13
   - Fixed `webui.html` next-cycle countdown display when `live.waiting` is true between crawl cycles.
   - Added **Price-Drop & Change Radar** (`Store.RecentChanges` + `/api/changes`), **Archive Market Analytics** (`Store.ArchiveAnalytics` + `/api/analytics`), **Interactive Listing Inspector & Full 115-Field JSON Viewer** (`Store.InspectListing` + `/api/listing` + Web UI), and CLI `-inspect <id>` flag (`aqar-crawler.exe -inspect <id>`).
   - Added `-radar` CLI flag (`aqar-crawler.exe -radar`) and optimized `Store.RecentChanges` to scan `listing_history` in reverse primary-key order (`WHERE change_type = 'update' ORDER BY id DESC`) and fall back across `title`, `user_title`, and `address`.
+
+
+## Market Intelligence & Future ML Valuation Model Blueprint
+- **Schema Migration `004` (`schema.go`, `store.go`, `compact.go`)**: Promoted high-signal market intelligence & valuation columns directly onto the `listings` table so SQL queries and ML pipelines can access them without decompressing `data_json`:
+  - `initial_price` (`REAL`): The original asking price when first seen (`price - initial_price` gives instant lifetime price cut/hike per listing in O(1)).
+  - `price_changes` (`INTEGER`): Count of substantive price revisions over the listing's lifecycle (seller motivation / price discovery signal).
+  - `whatsapp_count` (`INTEGER`): Live `whatsapp_requested_count` updated on every cycle (including inside lightweight `touchMeta` without rewriting the `data_json` blob), providing a direct **Buyer-Lead Velocity** proxy (`whatsapp_count / days_on_market`).
+  - `property_age` (`INTEGER`), `street_width` (`INTEGER`), `street_direction` (`INTEGER` — North/East/South/West facade, a major price determinant in Saudi real estate), and `rent_period` (`INTEGER` — yearly/monthly/daily).
+- **Key Features Preserved in `AQAR.db` for Downstream ML / Market Intelligence Models:**
+  1. **Liquidity & Time-on-Market (Absorption Rate):** Computed from `create_time` (true listing creation epoch) or `first_seen_at` to `removed_at` grouped by `(city_id, district_id, category)`. Fast removal + high `whatsapp_count` identifies high-liquidity micro-markets and underpriced deals.
+  2. **Clearing Price vs. Asking Price Spread:** Comparing `initial_price` (from `listings` or the `new` row in `listing_history`) against the final `price` immediately prior to `removed_at` measures the real negotiation/clearing discount per district.
+  3. **Hedonic Valuation Features (in `listings` + lossless `AQZ1` `data_json`):**
+     - Spatial: `province_id`, `city_id`, `direction_id`, `district_id`, `lat`, `lng`.
+     - Structural: `area`, `meter_price`, `beds`, `rooms`, `livings`, `wc`, `property_age`, `street_width`, `street_direction`, `length`, `width`, `flooors`, `apartments`, `stores`, `duplex`, `basement`, `pool`, `elevator`, `maid`, `driver`, `furnished`, `ac`, `car_entrance`.
+     - Broker & Regulatory Trust (REGA/FAL): `user_id`, `user.type`, `user.review`, `user.paid`, `verified`, `iam_verified`, `deed_verified`, `rega_licensed`, `fal_license_number`, `ad_license_number`.
+     - Seller Urgency: `refresh - create_time` (bump frequency), `premium`, `boosted`, and `price_changes`.

@@ -93,4 +93,17 @@ var migrations = []string{
 	// 003: canonical aqar.fm URL per listing (web API enrichment).
 	`ALTER TABLE listings ADD COLUMN url TEXT;
 	`,
+
+	// 004: market intelligence & valuation model columns (initial_price,
+	// price_changes, whatsapp_count, property_age, street_width,
+	// street_direction, rent_period).
+	`ALTER TABLE listings ADD COLUMN initial_price REAL;
+	ALTER TABLE listings ADD COLUMN price_changes INTEGER NOT NULL DEFAULT 0;
+	ALTER TABLE listings ADD COLUMN whatsapp_count INTEGER NOT NULL DEFAULT 0;
+	ALTER TABLE listings ADD COLUMN property_age INTEGER;
+	ALTER TABLE listings ADD COLUMN street_width INTEGER;
+	ALTER TABLE listings ADD COLUMN street_direction INTEGER;
+	ALTER TABLE listings ADD COLUMN rent_period INTEGER;
+	UPDATE listings SET initial_price = price WHERE initial_price IS NULL;
+	`,
 }

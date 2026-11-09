@@ -45,8 +45,10 @@ func CompactDB(ctx context.Context, dbPath string, log *Logger) (CompactStats, e
 		}
 	}
 
-	// Step 1: Open source DB briefly in read-write mode to checkpoint any WAL.
+	// Step 1: Open source DB briefly in read-write mode to apply any pending
+	// migrations and checkpoint any WAL.
 	if srcRW, err := OpenStore(dbPath); err == nil {
+		_ = srcRW.Migrate(ctx)
 		_ = srcRW.Checkpoint(ctx)
 		_ = srcRW.Close()
 	}
@@ -133,9 +135,16 @@ func CompactDB(ctx context.Context, dbPath string, log *Logger) (CompactStats, e
 		first_seen_at TEXT NOT NULL,
 		last_seen_at  TEXT NOT NULL,
 		last_change_at TEXT NOT NULL,
-		removed_at    TEXT,
-		seen_cycle    INTEGER NOT NULL DEFAULT 0,
-		url           TEXT
+		removed_at       TEXT,
+		seen_cycle       INTEGER NOT NULL DEFAULT 0,
+		url              TEXT,
+		initial_price    REAL,
+		price_changes    INTEGER NOT NULL DEFAULT 0,
+		whatsapp_count   INTEGER NOT NULL DEFAULT 0,
+		property_age     INTEGER,
+		street_width     INTEGER,
+		street_direction INTEGER,
+		rent_period      INTEGER
 	);
 	CREATE TABLE listing_history (
 		id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -448,8 +457,8 @@ func compactListingsTable(
 				id, data_json, data_hash, category, price, meter_price, area, beds, rooms,
 				furnished, lat, lng, province_id, city_id, direction_id, district_id,
 				premium, boosted, status, published, create_time, refresh, user_id, user_name,
-				first_seen_at, last_seen_at, last_change_at, removed_at, seen_cycle, url
-			) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+				first_seen_at, last_seen_at, last_change_at, removed_at, seen_cycle, url, initial_price
+			) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 		if err != nil {
 			return err
 		}
@@ -470,7 +479,7 @@ func compactListingsTable(
 				it.category, it.price, it.meterPrice, it.area, it.beds, it.rooms,
 				it.furnished, it.lat, it.lng, it.provinceID, it.cityID, it.directionID, it.districtID,
 				it.premium, it.boosted, it.status, it.published, it.createTime, it.refresh, it.userID, it.userName,
-				it.firstSeenAt, it.lastSeenAt, it.lastChangeAt, it.removedAt, it.seenCycle, it.url,
+				it.firstSeenAt, it.lastSeenAt, it.lastChangeAt, it.removedAt, it.seenCycle, it.url, it.price,
 			); err != nil {
 				return fmt.Errorf("insert compacted listing %d: %w", it.id, err)
 			}

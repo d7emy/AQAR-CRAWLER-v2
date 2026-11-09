@@ -245,6 +245,7 @@ func (s *Store) IngestPage(ctx context.Context, _ int64, cycle int, listings []m
 		id         int64
 		hash       string
 		refresh    int64
+		whatsapp   int64
 		raw        []byte
 		blob       []byte
 		m          map[string]any // original decoded map (no re-marshal)
@@ -282,7 +283,8 @@ func (s *Store) IngestPage(ctx context.Context, _ int64, cycle int, listings []m
 		}
 		contentHash := CanonicalContentHashBytes(raw)
 		ref := int64(toFloat(l["refresh"]))
-		items = append(items, item{id: id, hash: contentHash, refresh: ref, raw: raw, m: l})
+		wa := int64(toFloat(l["whatsapp_requested_count"]))
+		items = append(items, item{id: id, hash: contentHash, refresh: ref, whatsapp: wa, raw: raw, m: l})
 		ids = append(ids, id)
 	}
 
@@ -373,8 +375,9 @@ func (s *Store) IngestPage(ctx context.Context, _ int64, cycle int, listings []m
 			id, data_json, data_hash, category, price, meter_price, area, beds, rooms,
 			furnished, lat, lng, province_id, city_id, direction_id, district_id,
 			premium, boosted, status, published, create_time, refresh, user_id, user_name,
-			first_seen_at, last_seen_at, last_change_at, seen_cycle
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+			first_seen_at, last_seen_at, last_change_at, seen_cycle,
+			initial_price, price_changes, whatsapp_count, property_age, street_width, street_direction, rent_period
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, ?,0,?,?,?,?,?)`)
 	if err != nil {
 		return IngestionStats{}, fmt.Errorf("prepare insert: %w", err)
 	}
@@ -387,7 +390,10 @@ func (s *Store) IngestPage(ctx context.Context, _ int64, cycle int, listings []m
 			province_id = ?, city_id = ?, direction_id = ?, district_id = ?,
 			premium = ?, boosted = ?, status = ?, published = ?, create_time = ?,
 			refresh = ?, user_id = ?, user_name = ?,
-			last_seen_at = ?, last_change_at = ?, removed_at = NULL, seen_cycle = ?
+			last_seen_at = ?, last_change_at = ?, removed_at = NULL, seen_cycle = ?,
+			initial_price = COALESCE(initial_price, price, ?),
+			price_changes = CASE WHEN price IS NOT NULL AND ? IS NOT NULL AND price != ? THEN COALESCE(price_changes, 0) + 1 ELSE COALESCE(price_changes, 0) END,
+			whatsapp_count = ?, property_age = ?, street_width = ?, street_direction = ?, rent_period = ?
 		WHERE id = ?`)
 	if err != nil {
 		return IngestionStats{}, fmt.Errorf("prepare update: %w", err)
@@ -397,16 +403,16 @@ func (s *Store) IngestPage(ctx context.Context, _ int64, cycle int, listings []m
 	// touchBlob refreshes the compressed snapshot and refresh timestamp when an
 	// unchanged listing was bumped or migrated.
 	touchBlob, err := tx.PrepareContext(ctx,
-		`UPDATE listings SET data_json = ?, data_hash = ?, refresh = ?, last_seen_at = ?, seen_cycle = ?, removed_at = NULL WHERE id = ?`)
+		`UPDATE listings SET data_json = ?, data_hash = ?, refresh = ?, whatsapp_count = ?, last_seen_at = ?, seen_cycle = ?, removed_at = NULL WHERE id = ?`)
 	if err != nil {
 		return IngestionStats{}, fmt.Errorf("prepare touchBlob: %w", err)
 	}
 	defer touchBlob.Close()
 
-	// touchMeta updates only last_seen_at, seen_cycle, and clears removed_at
-	// when neither canonical content nor refresh changed (zero blob rewrite).
+	// touchMeta updates only last_seen_at, seen_cycle, whatsapp_count, and clears
+	// removed_at when neither canonical content nor refresh changed (zero blob rewrite).
 	touchMeta, err := tx.PrepareContext(ctx,
-		`UPDATE listings SET last_seen_at = ?, seen_cycle = ?, removed_at = NULL WHERE id = ?`)
+		`UPDATE listings SET last_seen_at = ?, seen_cycle = ?, whatsapp_count = ?, removed_at = NULL WHERE id = ?`)
 	if err != nil {
 		return IngestionStats{}, fmt.Errorf("prepare touchMeta: %w", err)
 	}
@@ -443,11 +449,11 @@ func (s *Store) IngestPage(ctx context.Context, _ int64, cycle int, listings []m
 			if it.refresh > 0 {
 				refArg = int(it.refresh)
 			}
-			if _, err := touchBlob.ExecContext(ctx, it.blob, it.hash, refArg, fetchedAt, cycle, it.id); err != nil {
+			if _, err := touchBlob.ExecContext(ctx, it.blob, it.hash, refArg, it.whatsapp, fetchedAt, cycle, it.id); err != nil {
 				return IngestionStats{}, fmt.Errorf("touchBlob listing %d: %w", it.id, err)
 			}
 		default: // touch_meta
-			if _, err := touchMeta.ExecContext(ctx, fetchedAt, cycle, it.id); err != nil {
+			if _, err := touchMeta.ExecContext(ctx, fetchedAt, cycle, it.whatsapp, it.id); err != nil {
 				return IngestionStats{}, fmt.Errorf("touchMeta listing %d: %w", it.id, err)
 			}
 		}
@@ -462,14 +468,15 @@ func (s *Store) IngestPage(ctx context.Context, _ int64, cycle int, listings []m
 // listingValues holds the columns shared by the INSERT and UPDATE statements
 // below; the arg-slicing helpers keep both statements in lockstep.
 type listingValues struct {
-	id                                                                    int64
-	blob                                                                  []byte
-	hash                                                                  string
-	category, price, meterPrice, area, beds, rooms, furnished, lat, lng   any
-	provinceID, cityID, directionID, districtID, premium, boosted, status any
-	published, createTime, refresh, userID, userName                      any
-	fetchedAt                                                             string
-	cycle                                                                 int
+	id                                                                      int64
+	blob                                                                    []byte
+	hash                                                                    string
+	category, price, meterPrice, area, beds, rooms, furnished, lat, lng     any
+	provinceID, cityID, directionID, districtID, premium, boosted, status   any
+	published, createTime, refresh, userID, userName                        any
+	whatsappCount, propertyAge, streetWidth, streetDirection, rentPeriod    any
+	fetchedAt                                                               string
+	cycle                                                                   int
 }
 
 func buildListingValues(id int64, blob []byte, hash string, m map[string]any, fetchedAt string, cycle int) listingValues {
@@ -485,12 +492,17 @@ func buildListingValues(id int64, blob []byte, hash string, m map[string]any, fe
 		boosted: intOrNil(m, "boosted"), status: intOrNil(m, "status"),
 		published: intOrNil(m, "published"), createTime: intOrNil(m, "create_time"),
 		refresh: intOrNil(m, "refresh"), userID: intOrNil(m, "user_id"),
-		userName: strOrNil(m, "user", "name"),
-		fetchedAt: fetchedAt, cycle: cycle,
+		userName:        strOrNil(m, "user", "name"),
+		whatsappCount:   int64(toFloat(m["whatsapp_requested_count"])),
+		propertyAge:     intOrNil(m, "age"),
+		streetWidth:     intOrNil(m, "street_width"),
+		streetDirection: intOrNil(m, "street_direction"),
+		rentPeriod:      intOrNil(m, "rent_period"),
+		fetchedAt:       fetchedAt, cycle: cycle,
 	}
 }
 
-// insertArgs matches the 28-column INSERT statement.
+// insertArgs matches the 34-parameter INSERT statement.
 func (v listingValues) insertArgs() []any {
 	return []any{
 		v.id, v.blob, v.hash,
@@ -499,11 +511,11 @@ func (v listingValues) insertArgs() []any {
 		v.premium, v.boosted, v.status, v.published, v.createTime, v.refresh,
 		v.userID, v.userName,
 		v.fetchedAt, v.fetchedAt, v.fetchedAt, v.cycle,
+		v.price, v.whatsappCount, v.propertyAge, v.streetWidth, v.streetDirection, v.rentPeriod,
 	}
 }
 
-// updateArgs matches the UPDATE statement (data_json..user_name, last_seen_at,
-// last_change_at, seen_cycle, WHERE id). first_seen_at is preserved.
+// updateArgs matches the UPDATE statement.
 func (v listingValues) updateArgs() []any {
 	return []any{
 		v.blob, v.hash,
@@ -511,7 +523,10 @@ func (v listingValues) updateArgs() []any {
 		v.lat, v.lng, v.provinceID, v.cityID, v.directionID, v.districtID,
 		v.premium, v.boosted, v.status, v.published, v.createTime, v.refresh,
 		v.userID, v.userName,
-		v.fetchedAt, v.fetchedAt, v.cycle, v.id,
+		v.fetchedAt, v.fetchedAt, v.cycle,
+		v.price, v.price, v.price,
+		v.whatsappCount, v.propertyAge, v.streetWidth, v.streetDirection, v.rentPeriod,
+		v.id,
 	}
 }
 
