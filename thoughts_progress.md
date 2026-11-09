@@ -159,3 +159,4 @@ Reverse-engineered the AQAR (عقار) iOS app API from a Burp Suite capture (13
   - Chunked `SELECT ... WHERE id IN (...)` in `IngestPage` (`store.go`) into 450-ID batches so large `page_size` configs never hit SQLite host parameter limits.
   - Fixed `webui.html` next-cycle countdown display when `live.waiting` is true between crawl cycles.
   - Added **Price-Drop & Change Radar** (`Store.RecentChanges` + `/api/changes`), **Archive Market Analytics** (`Store.ArchiveAnalytics` + `/api/analytics`), **Interactive Listing Inspector & Full 115-Field JSON Viewer** (`Store.InspectListing` + `/api/listing` + Web UI), and CLI `-inspect <id>` flag (`aqar-crawler.exe -inspect <id>`).
+  - Added `-radar` CLI flag (`aqar-crawler.exe -radar`) and optimized `Store.RecentChanges` to scan `listing_history` in reverse primary-key order (`WHERE change_type = 'update' ORDER BY id DESC`) and fall back across `title`, `user_title`, and `address`.
