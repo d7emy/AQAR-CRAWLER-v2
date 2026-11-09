@@ -1,4 +1,5 @@
 # PowerShell 24/7 Watchdog Supervisor (Never prompts "Terminate batch job (Y/N)?")
+$env:GODEBUG = "execerrdot=0"
 Set-Location $PSScriptRoot
 New-Item -ItemType Directory -Force -Path "state", "logs" | Out-Null
 Remove-Item "state\stopfile", "state\update_restart" -Force -ErrorAction SilentlyContinue

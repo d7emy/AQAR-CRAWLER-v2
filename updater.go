@@ -70,8 +70,14 @@ func NewAutoUpdater(
 	if repoDir == "" {
 		repoDir = "."
 	}
+	if abs, err := filepath.Abs(repoDir); err == nil {
+		repoDir = abs
+	}
 	if stateDir == "" {
 		stateDir = "state"
+	}
+	if !filepath.IsAbs(stateDir) {
+		stateDir = filepath.Join(repoDir, stateDir)
 	}
 	if configPath == "" {
 		configPath = "config.json"
@@ -447,9 +453,13 @@ func (u *AutoUpdater) binaryNames() (curBin, newBin, oldBin string) {
 	if runtime.GOOS == "windows" {
 		ext = ".exe"
 	}
-	curBin = filepath.Join(u.repoDir, "aqar-crawler"+ext)
-	newBin = filepath.Join(u.repoDir, "aqar-crawler.new"+ext)
-	oldBin = filepath.Join(u.repoDir, "aqar-crawler.old"+ext)
+	base := u.repoDir
+	if abs, err := filepath.Abs(base); err == nil {
+		base = abs
+	}
+	curBin = filepath.Join(base, "aqar-crawler"+ext)
+	newBin = filepath.Join(base, "aqar-crawler.new"+ext)
+	oldBin = filepath.Join(base, "aqar-crawler.old"+ext)
 	return
 }
 
