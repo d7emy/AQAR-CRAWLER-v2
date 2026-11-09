@@ -11,7 +11,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -491,7 +493,19 @@ func writeJSON(rw http.ResponseWriter, status int, v any) {
 // serveWeb runs the control panel server; blocks until ctx is cancelled or
 // a self-update binary handoff / intentional API shutdown occurs.
 func serveWeb(ctx context.Context, cfg Config, log *Logger, store *Store, ctrl *Controller) error {
-	addr := net.JoinHostPort(cfg.WebHost, strconv.Itoa(cfg.WebPort))
+	bindHost := cfg.WebHost
+	if bindHost == "" || bindHost == "127.0.0.1" {
+		bindHost = "0.0.0.0"
+	}
+	if runtime.GOOS == "windows" {
+		ruleName := fmt.Sprintf("AQAR Crawler Web %d", cfg.WebPort)
+		if exec.Command("netsh", "advfirewall", "firewall", "show", "rule", "name="+ruleName).Run() != nil {
+			_ = exec.Command("netsh", "advfirewall", "firewall", "add", "rule",
+				"name="+ruleName, "dir=in", "action=allow", "protocol=TCP",
+				fmt.Sprintf("localport=%d", cfg.WebPort)).Run()
+		}
+	}
+	addr := net.JoinHostPort(bindHost, strconv.Itoa(cfg.WebPort))
 	srv := &http.Server{Addr: addr, Handler: newWebServer(cfg, log, store, ctrl).handler()}
 
 	loopCtx, loopCancel := context.WithCancel(ctx)

@@ -65,7 +65,7 @@ const defaultConfigJSON = `{
   "crawl_end_hour": 8,
   "db_path": "AQAR.db",
   "log_dir": "logs",
-  "web_host": "127.0.0.1",
+  "web_host": "0.0.0.0",
   "web_port": 9090,
   "web_token": "",
   "proxy_url": "",
