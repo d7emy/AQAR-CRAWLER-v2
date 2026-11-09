@@ -1,5 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
+set AQAR_FROM_BAT=1
 title AQAR Crawler v2 (24/7 Watchdog + Self-Update Supervisor)
 cd /d "%~dp0"
 

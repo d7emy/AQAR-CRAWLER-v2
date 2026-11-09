@@ -246,6 +246,9 @@ func main() {
 	if *webMode {
 		code := runWeb(cfg, *configPath, log, store, client)
 		_ = store.Close()
+		if code == 0 {
+			dismissBatchCtrlCPrompt()
+		}
 		os.Exit(code)
 	}
 
@@ -319,6 +322,10 @@ func main() {
 	history, _ := store.DBHistoryCount(nctx)
 	ncancel()
 	notify.Stopped(snapshot.Cycle, reason, snapshot, listings, history, store.DBSizeMB())
+	_ = store.Close()
+	if sigCtx.Err() != nil {
+		dismissBatchCtrlCPrompt()
+	}
 	os.Exit(0)
 }
 
