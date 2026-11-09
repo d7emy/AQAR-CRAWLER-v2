@@ -994,19 +994,16 @@
           <table class="chronicle-table">
             <thead>
               <tr>
-                <th>Listing</th>
-                <th class="left">Sector</th>
+                <th class="left">Parcel &amp; Sector</th>
                 <th class="left">Property &amp; District</th>
-                <th>Prior SAR</th>
-                <th>Current SAR</th>
+                <th>Prior → Current (SAR)</th>
                 <th>Spread (Δ%)</th>
-                <th class="left">Modified</th>
-                <th>Recorded</th>
+                <th class="left">Changed</th>
                 <th>Dossier</th>
               </tr>
             </thead>
             <tbody id="radarRows">
-              <tr><td colspan="9" class="left" style="color:var(--chronicle-sandstone)">Loading price-revision chronicle...</td></tr>
+              <tr><td colspan="6" class="left" style="color:var(--chronicle-sandstone)">Loading price-revision chronicle...</td></tr>
             </tbody>
           </table>
         </div>
@@ -1526,7 +1523,7 @@ async function loadChanges(onlyDrops){
     }
 
     if(!items.length){
-      $("radarRows").innerHTML = '<tr><td colspan="9" class="left" style="color:var(--chronicle-sandstone)">No matching revisions found in archive yet.</td></tr>';
+      $("radarRows").innerHTML = '<tr><td colspan="6" class="left" style="color:var(--chronicle-sandstone)">No matching revisions found in archive yet.</td></tr>';
       return;
     }
 
@@ -1536,19 +1533,21 @@ async function loadChanges(onlyDrops){
       const badgeCls = d < 0 ? "delta-badge delta-drop" : (d > 0 ? "delta-badge delta-hike" : "delta-badge delta-flat");
       const sym = d < 0 ? "▼ " : (d > 0 ? "▲ +" : "◆ ");
       const dTxt = d === 0 ? "◆ meta/text" : (sym + it.price_pct.toFixed(1) + "% (" + (d>0?"+":"") + fmtCompactSAR(d) + ")");
-      const link = it.url ? '<a class="editorial-link num" href="'+esc(it.url)+'" target="_blank">#'+it.id+'</a>' : '<span class="num">#'+it.id+'</span>';
-      const loc = esc(it.title || it.address || "—").slice(0, 46);
+      const link = it.url ? '<a class="editorial-link num" href="'+esc(it.url)+'" target="_blank" onclick="event.stopPropagation()">#'+it.id+'</a>' : '<span class="num">#'+it.id+'</span>';
+      const rawLoc = String(it.title || it.address || "—");
+      const locChars = Array.from(rawLoc);
+      const loc = esc(locChars.slice(0, 36).join("") + (locChars.length > 36 ? "…" : ""));
       const rowCls = it.id === currentInspectedId ? ' class="selected-row"' : '';
-      h += '<tr'+rowCls+'>'
-        + '<td><b>'+link+'</b></td>'
-        + '<td class="left">'+esc(it.category_name || ("Sector "+it.category))+'</td>'
-        + '<td class="left" dir="auto" title="'+esc(it.address)+'">'+loc+'</td>'
-        + '<td class="num" style="color:var(--chronicle-sandstone)">'+fmt(it.old_price)+'</td>'
-        + '<td class="num"><b>'+fmt(it.new_price)+'</b></td>'
+      const pricePair = (it.old_price && it.old_price !== it.new_price)
+        ? ('<span style="color:var(--chronicle-sandstone)">'+fmt(it.old_price)+'</span> → <b>'+fmt(it.new_price)+'</b>')
+        : ('<b>'+fmt(it.new_price || it.old_price)+'</b>');
+      h += '<tr'+rowCls+' style="cursor:pointer" onclick="inspectById('+it.id+', true)">'
+        + '<td class="left"><div><b>'+link+'</b></div><div style="font-size:11px;color:var(--chronicle-sandstone)">'+esc(it.category_name || ("Sector "+it.category))+'</div></td>'
+        + '<td class="left" title="'+esc(it.address)+'"><span dir="auto">'+loc+'</span></td>'
+        + '<td class="num">'+pricePair+'</td>'
         + '<td><span class="'+badgeCls+'">'+dTxt+'</span></td>'
-        + '<td class="left"><span class="tag-pill">'+esc((it.changed_fields||[]).join(", ")||"snapshot")+'</span></td>'
-        + '<td class="num" style="font-size:11.5px;color:var(--chronicle-sandstone)">'+esc((it.changed_at||"").slice(5,16).replace("T"," "))+'</td>'
-        + '<td><button class="btn sm" onclick="inspectById('+it.id+', true)">Monograph →</button></td>'
+        + '<td class="left"><span class="tag-pill">'+esc((it.changed_fields||[]).slice(0,2).join(", ")||"snapshot")+'</span><div class="num" style="font-size:10.5px;color:var(--chronicle-sandstone);margin-top:2px">'+esc((it.changed_at||"").slice(5,16).replace("T"," "))+'</div></td>'
+        + '<td><button class="btn sm" onclick="event.stopPropagation();inspectById('+it.id+', true)">Open →</button></td>'
         + '</tr>';
     });
     $("radarRows").innerHTML = h;
@@ -1615,7 +1614,8 @@ async function inspectListing(scrollIfMobile){
     if(parsed.ac) pills.push('<span class="tag-pill">Central/Split AC</span>');
 
     const titleStr = sum.title || parsed.title || parsed.user_title || ((sum.category_name || "Property") + " — " + (sum.address || parsed.address || ("#" + sum.id)));
-    const contentSnippet = parsed.content ? String(parsed.content).trim().replace(/\s+/g, " ").slice(0, 180) : "";
+    const contentChars = parsed.content ? Array.from(String(parsed.content).trim().replace(/\s+/g, " ")) : [];
+    const contentSnippet = contentChars.slice(0, 150).join("");
 
     let h = '<div class="monograph-header">'
       + '<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">'
@@ -1628,7 +1628,7 @@ async function inspectListing(scrollIfMobile){
       + '</div>'
       + '<div class="monograph-title-ar"><span dir="auto">' + esc(titleStr) + '</span></div>'
       + '<div class="monograph-addr-ar"><span dir="auto">' + esc(sum.address || parsed.address || "Kingdom of Saudi Arabia") + '</span></div>'
-      + (contentSnippet ? '<div style="margin-top:6px;padding-top:6px;border-top:1px dashed var(--chronicle-rule);font-size:12px;color:var(--chronicle-walnut);line-height:1.45"><span dir="auto">' + esc(contentSnippet) + (parsed.content.length > 180 ? "…" : "") + '</span></div>' : '')
+      + (contentSnippet ? '<div style="margin-top:6px;padding-top:6px;border-top:1px dashed var(--chronicle-rule);font-size:12px;color:var(--chronicle-walnut);line-height:1.45"><span dir="auto">' + esc(contentSnippet) + (contentChars.length > 150 ? "…" : "") + '</span></div>' : '')
       + '</div>';
 
     h += '<div class="spec-grid">'
