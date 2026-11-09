@@ -154,3 +154,8 @@ Reverse-engineered the AQAR (عقار) iOS app API from a Burp Suite capture (13
   - Pooled `flate.Reader` (`flate.Resetter`) and 8 KB `bytes.Buffer` in `compress.go` (`DecompressJSON` / `DecompressJSONBytes`), eliminating 32 KB decompressor heap allocations on every read.
   - Lightweight 1-field struct decoding in `ExportListings` (avoiding 115-field `map[string]any` allocations across 178K rows) and `WHERE url IS NULL OR url != ?` guard in `SetListingURLs`.
   - Periodic WAL checkpointing every 100 pages inside the crawl loop plus guaranteed end-of-cycle `PRAGMA wal_checkpoint(TRUNCATE)` in `crawler.go`, and HTTP/2 + 120s idle keep-alive pooling in `client.go`.
+- Second-pass code audit & new market-intelligence capabilities added:
+  - Fixed `logger.go` `maybeRotate` to check `os.Stat` once every 256 log writes instead of every log line (eliminating 99.6% of `Stat` syscalls).
+  - Chunked `SELECT ... WHERE id IN (...)` in `IngestPage` (`store.go`) into 450-ID batches so large `page_size` configs never hit SQLite host parameter limits.
+  - Fixed `webui.html` next-cycle countdown display when `live.waiting` is true between crawl cycles.
+  - Added **Price-Drop & Change Radar** (`Store.RecentChanges` + `/api/changes`), **Archive Market Analytics** (`Store.ArchiveAnalytics` + `/api/analytics`), **Interactive Listing Inspector & Full 115-Field JSON Viewer** (`Store.InspectListing` + `/api/listing` + Web UI), and CLI `-inspect <id>` flag (`aqar-crawler.exe -inspect <id>`).

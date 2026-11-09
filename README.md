@@ -60,6 +60,9 @@ go build -o aqar-crawler.exe .
 
 # Compact, deduplicate noise history, and compress an existing AQAR.db in-place
 .\aqar-crawler.exe -compact
+
+# Inspect a specific listing's metadata, compression ratio, and version diff timeline
+.\aqar-crawler.exe -inspect 6347338
 ```
 
 ### Configuration

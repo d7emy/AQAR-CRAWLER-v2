@@ -16,11 +16,12 @@ const maxLogSizeBytes = 20 << 20 // 20 MB
 // Logger writes leveled messages to the console and to a file in logDir.
 // The file is size-rotated; a fresh section is logged on every process start.
 type Logger struct {
-	mu    sync.Mutex
-	l     *log.Logger
-	out   *os.File
-	path  string
-	quiet bool // TUI/web mode: console output suppressed
+	mu     sync.Mutex
+	l      *log.Logger
+	out    *os.File
+	path   string
+	quiet  bool // TUI/web mode: console output suppressed
+	writes uint32
 }
 
 func NewLogger(dir string) (*Logger, error) {
@@ -60,8 +61,12 @@ func (lg *Logger) SetQuiet(q bool) {
 	}
 }
 
-// maybeRotate checks the log size and rotates if needed.
+// maybeRotate checks the log size every 256 writes and rotates if needed.
 func (lg *Logger) maybeRotate() {
+	lg.writes++
+	if lg.writes&0xff != 0 {
+		return
+	}
 	fi, err := os.Stat(lg.path)
 	if err != nil || fi.Size() <= maxLogSizeBytes {
 		return

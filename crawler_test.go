@@ -567,4 +567,57 @@ func Test_ProxyFallbackDirect(t *testing.T) {
 	}
 }
 
+// Test_PriceRadarAndInspector verifies RecentChanges, InspectListing, and ArchiveAnalytics.
+func Test_PriceRadarAndInspector(t *testing.T) {
+	store, err := OpenStore(t.TempDir() + "/radar.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Cycle 1: ingest listing 777 at 100,000 SAR
+	_, err = store.IngestPage(ctx, 1, 1, []map[string]any{{
+		"id": float64(777), "category": float64(1), "price": float64(100000),
+		"area": float64(180), "beds": float64(4), "title": "شقة فاخرة", "address": "الرياض",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(5 * time.Millisecond)
+
+	// Cycle 2: price drops to 85,000 SAR (-15%)
+	_, err = store.IngestPage(ctx, 2, 2, []map[string]any{{
+		"id": float64(777), "category": float64(1), "price": float64(85000),
+		"area": float64(180), "beds": float64(4), "title": "شقة فاخرة", "address": "الرياض",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sum, err := store.InspectListing(ctx, 777)
+	if err != nil {
+		t.Fatalf("InspectListing: %v", err)
+	}
+	if sum.Price != 85000 || sum.CompressedBytes == 0 || sum.RawBytes <= sum.CompressedBytes {
+		t.Fatalf("unexpected ListingSummary: %+v", sum)
+	}
+
+	drops, err := store.RecentChanges(ctx, 10, true)
+	if err != nil || len(drops) != 1 {
+		t.Fatalf("expected 1 price drop, got %d (err=%v)", len(drops), err)
+	}
+	if drops[0].OldPrice != 100000 || drops[0].NewPrice != 85000 || drops[0].PriceDelta != -15000 {
+		t.Fatalf("unexpected PriceChangeEvent: %+v", drops[0])
+	}
+
+	an, err := store.ArchiveAnalytics(ctx)
+	if err != nil || an.ActiveListings != 1 || an.UpdatedListings != 1 {
+		t.Fatalf("unexpected ArchiveAnalytics: %+v (err=%v)", an, err)
+	}
+}
+
 var _ = time.Now

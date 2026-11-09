@@ -98,6 +98,8 @@ func (w *webServer) handler() http.Handler {
 	mux.HandleFunc("/api/control", w.auth(w.handleControl))
 	mux.HandleFunc("/api/log", w.auth(w.handleLog))
 	mux.HandleFunc("/api/listing", w.auth(w.handleListing))
+	mux.HandleFunc("/api/changes", w.auth(w.handleChanges))
+	mux.HandleFunc("/api/analytics", w.auth(w.handleAnalytics))
 	mux.HandleFunc("/api/export", w.auth(w.handleExport))
 	return mux
 }
@@ -313,7 +315,8 @@ func tailLines(s string, n int) []string {
 	return out
 }
 
-// handleListing serves the version timeline + field-level diffs for one id.
+// handleListing serves the current listing summary, full decompressed JSON,
+// and chronological version timeline + field-level diffs for one id.
 func (w *webServer) handleListing(rw http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
 	if err != nil || id <= 0 {
@@ -322,9 +325,14 @@ func (w *webServer) handleListing(rw http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
+	summary, serr := w.store.InspectListing(ctx, id)
 	history, err := w.store.ListingHistory(ctx, id, 50)
 	if err != nil {
 		writeJSON(rw, http.StatusInternalServerError, map[string]any{"ok": false, "message": err.Error()})
+		return
+	}
+	if serr != nil && len(history) == 0 {
+		writeJSON(rw, http.StatusNotFound, map[string]any{"ok": false, "message": fmt.Sprintf("listing %d not found in archive", id)})
 		return
 	}
 	type row struct {
@@ -345,7 +353,43 @@ func (w *webServer) handleListing(rw http.ResponseWriter, r *http.Request) {
 		}
 		rows = append(rows, rr)
 	}
-	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "id": id, "rows": rows})
+	writeJSON(rw, http.StatusOK, map[string]any{
+		"ok":      true,
+		"id":      id,
+		"summary": summary,
+		"rows":    rows,
+	})
+}
+
+// handleChanges serves the Price-Drop & Update Radar feed.
+func (w *webServer) handleChanges(rw http.ResponseWriter, r *http.Request) {
+	limit := 30
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+	onlyDrops := r.URL.Query().Get("drops") == "1" || r.URL.Query().Get("drops") == "true"
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	items, err := w.store.RecentChanges(ctx, limit, onlyDrops)
+	if err != nil {
+		writeJSON(rw, http.StatusInternalServerError, map[string]any{"ok": false, "message": err.Error()})
+		return
+	}
+	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "items": items})
+}
+
+// handleAnalytics serves archive-wide active/removed breakdown & market stats.
+func (w *webServer) handleAnalytics(rw http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	an, err := w.store.ArchiveAnalytics(ctx)
+	if err != nil {
+		writeJSON(rw, http.StatusInternalServerError, map[string]any{"ok": false, "message": err.Error()})
+		return
+	}
+	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "analytics": an})
 }
 
 // handleExport streams the archive as CSV (optionally one category).

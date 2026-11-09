@@ -286,16 +286,19 @@ func (s *Store) IngestPage(ctx context.Context, _ int64, cycle int, listings []m
 		ids = append(ids, id)
 	}
 
-	// Step 3: Fetch current hash & refresh for these ids in one query.
+	// Step 3: Fetch current hash & refresh for these ids (chunked to stay well
+	// below SQLite's host parameter limit regardless of page_size).
 	type curState struct {
 		hash    string
 		refresh int64
 	}
 	current := make(map[int64]curState, len(ids))
-	{
-		placeholders := strings.TrimRight(strings.Repeat("?,", len(ids)), ",")
-		args := make([]any, len(ids))
-		for i, id := range ids {
+	const queryChunk = 450
+	for start := 0; start < len(ids); start += queryChunk {
+		chunk := ids[start:min(len(ids), start+queryChunk)]
+		placeholders := strings.TrimRight(strings.Repeat("?,", len(chunk)), ",")
+		args := make([]any, len(chunk))
+		for i, id := range chunk {
 			args[i] = id
 		}
 		rows, err := s.db.QueryContext(ctx,
@@ -304,18 +307,20 @@ func (s *Store) IngestPage(ctx context.Context, _ int64, cycle int, listings []m
 		if err != nil {
 			return IngestionStats{}, fmt.Errorf("querying current hashes: %w", err)
 		}
-		defer rows.Close()
 		for rows.Next() {
 			var id, ref int64
 			var h string
 			if err := rows.Scan(&id, &h, &ref); err != nil {
+				rows.Close()
 				return IngestionStats{}, fmt.Errorf("scan hash row: %w", err)
 			}
 			current[id] = curState{hash: h, refresh: ref}
 		}
 		if err := rows.Err(); err != nil {
+			rows.Close()
 			return IngestionStats{}, fmt.Errorf("iterating hash rows: %w", err)
 		}
+		rows.Close()
 	}
 
 	stats := IngestionStats{Seen: len(items)}
@@ -672,6 +677,308 @@ func (s *Store) GetListingJSON(ctx context.Context, id int64) (string, error) {
 		return "", err
 	}
 	return DecompressJSON(raw)
+}
+
+// ListingSummary holds the current metadata and decompressed full JSON for a
+// single listing, used by the Web Inspector and CLI -inspect flag.
+type ListingSummary struct {
+	ID              int64   `json:"id"`
+	Category        int     `json:"category"`
+	CategoryName    string  `json:"category_name"`
+	Price           float64 `json:"price"`
+	MeterPrice      float64 `json:"meter_price"`
+	Area            float64 `json:"area"`
+	Beds            int     `json:"beds"`
+	Rooms           int     `json:"rooms"`
+	Title           string  `json:"title"`
+	Address         string  `json:"address"`
+	URL             string  `json:"url"`
+	FirstSeenAt     string  `json:"first_seen_at"`
+	LastSeenAt      string  `json:"last_seen_at"`
+	LastChangeAt    string  `json:"last_change_at"`
+	RemovedAt       string  `json:"removed_at,omitempty"`
+	SeenCycle       int     `json:"seen_cycle"`
+	CompressedBytes int     `json:"compressed_bytes"`
+	RawBytes        int     `json:"raw_bytes"`
+	FullJSON        string  `json:"full_json"`
+}
+
+// InspectListing retrieves a listing's full metadata and decompressed JSON.
+func (s *Store) InspectListing(ctx context.Context, id int64) (ListingSummary, error) {
+	var out ListingSummary
+	var rawBlob []byte
+	var cat, beds, rooms sql.NullInt64
+	var price, mprice, area sql.NullFloat64
+	var urlStr, remAt sql.NullString
+
+	err := s.ro.QueryRowContext(ctx, `
+		SELECT id, category, price, meter_price, area, beds, rooms, url,
+		       first_seen_at, last_seen_at, last_change_at, removed_at, seen_cycle, data_json
+		FROM listings WHERE id = ?`, id).Scan(
+		&out.ID, &cat, &price, &mprice, &area, &beds, &rooms, &urlStr,
+		&out.FirstSeenAt, &out.LastSeenAt, &out.LastChangeAt, &remAt, &out.SeenCycle, &rawBlob,
+	)
+	if err != nil {
+		return out, err
+	}
+	out.Category = int(cat.Int64)
+	out.CategoryName = categoryNames[out.Category]
+	out.Price = price.Float64
+	out.MeterPrice = mprice.Float64
+	out.Area = area.Float64
+	out.Beds = int(beds.Int64)
+	out.Rooms = int(rooms.Int64)
+	out.URL = urlStr.String
+	out.RemovedAt = remAt.String
+	out.CompressedBytes = len(rawBlob)
+
+	if plain, err := DecompressJSON(rawBlob); err == nil {
+		out.FullJSON = plain
+		out.RawBytes = len(plain)
+		var meta struct {
+			Title     string `json:"title"`
+			UserTitle string `json:"user_title"`
+			Address   string `json:"address"`
+		}
+		if json.Unmarshal([]byte(plain), &meta) == nil {
+			out.Title = meta.Title
+			if out.Title == "" {
+				out.Title = meta.UserTitle
+			}
+			out.Address = meta.Address
+		}
+	}
+	return out, nil
+}
+
+// PriceChangeEvent represents a recent listing update (especially price drops
+// and increases) detected across crawl cycles.
+type PriceChangeEvent struct {
+	ID            int64    `json:"id"`
+	Category      int      `json:"category"`
+	CategoryName  string   `json:"category_name"`
+	Title         string   `json:"title"`
+	Address       string   `json:"address"`
+	Area          float64  `json:"area"`
+	OldPrice      float64  `json:"old_price"`
+	NewPrice      float64  `json:"new_price"`
+	PriceDelta    float64  `json:"price_delta"`
+	PricePct      float64  `json:"price_pct"`
+	ChangedFields []string `json:"changed_fields"`
+	ChangedAt     string   `json:"changed_at"`
+	URL           string   `json:"url,omitempty"`
+	Active        bool     `json:"active"`
+}
+
+// RecentChanges returns the most recently updated listings in the archive,
+// walking listing_history in reverse primary-key order (O(1) index scan) and
+// comparing each listing's latest two snapshots to surface price drops, price
+// hikes, and modified fields.
+func (s *Store) RecentChanges(ctx context.Context, limit int, onlyDrops bool) ([]PriceChangeEvent, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 30
+	}
+	scanLimit := limit * 3
+	if onlyDrops {
+		scanLimit = limit * 8
+	}
+	rows, err := s.ro.QueryContext(ctx, `
+		SELECT h.listing_id, COALESCE(l.category, 0), COALESCE(l.price, 0), COALESCE(l.area, 0),
+		       COALESCE(l.url, ''), h.fetched_at, l.removed_at IS NULL
+		FROM listing_history h
+		JOIN listings l ON l.id = h.listing_id
+		WHERE h.change_type = 'update'
+		ORDER BY h.id DESC
+		LIMIT ?`, scanLimit)
+	if err != nil {
+		return nil, fmt.Errorf("query recent changes: %w", err)
+	}
+	type cand struct {
+		id        int64
+		cat       int
+		price     float64
+		area      float64
+		url       string
+		changedAt string
+		active    bool
+	}
+	var cands []cand
+	seenID := make(map[int64]struct{}, scanLimit)
+	for rows.Next() {
+		var c cand
+		if err := rows.Scan(&c.id, &c.cat, &c.price, &c.area, &c.url, &c.changedAt, &c.active); err == nil {
+			if _, dup := seenID[c.id]; !dup {
+				seenID[c.id] = struct{}{}
+				cands = append(cands, c)
+			}
+		}
+	}
+	rows.Close()
+
+	out := make([]PriceChangeEvent, 0, limit)
+	for _, c := range cands {
+		if len(out) >= limit {
+			break
+		}
+		// Fetch the 2 most recent non-removed snapshots for this listing.
+		hrows, err := s.ro.QueryContext(ctx, `
+			SELECT data_json, fetched_at FROM listing_history
+			WHERE listing_id = ? AND change_type IN ('new', 'update') AND data_json IS NOT NULL
+			ORDER BY id DESC LIMIT 2`, c.id)
+		if err != nil {
+			continue
+		}
+		var blobs [][]byte
+		var latestAt string
+		for hrows.Next() {
+			var b []byte
+			var ft string
+			if hrows.Scan(&b, &ft) == nil && len(b) > 0 {
+				if latestAt == "" {
+					latestAt = ft
+				}
+				blobs = append(blobs, b)
+			}
+		}
+		hrows.Close()
+		if len(blobs) < 2 {
+			continue
+		}
+		newBytes, err1 := DecompressJSONBytes(blobs[0])
+		oldBytes, err2 := DecompressJSONBytes(blobs[1])
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		var newSnap, oldSnap struct {
+			Price     float64 `json:"price"`
+			Title     string  `json:"title"`
+			UserTitle string  `json:"user_title"`
+			Address   string  `json:"address"`
+			Status    int     `json:"status"`
+			Content   string  `json:"content"`
+			Area      float64 `json:"area"`
+		}
+		if json.Unmarshal(newBytes, &newSnap) != nil || json.Unmarshal(oldBytes, &oldSnap) != nil {
+			continue
+		}
+		delta := newSnap.Price - oldSnap.Price
+		if onlyDrops && delta >= 0 {
+			continue
+		}
+		var pct float64
+		if oldSnap.Price > 0 {
+			pct = (delta / oldSnap.Price) * 100
+		}
+		var fields []string
+		if newSnap.Price != oldSnap.Price {
+			fields = append(fields, "price")
+		}
+		if newSnap.Title != oldSnap.Title || newSnap.UserTitle != oldSnap.UserTitle {
+			fields = append(fields, "title")
+		}
+		if newSnap.Content != oldSnap.Content {
+			fields = append(fields, "content")
+		}
+		if newSnap.Status != oldSnap.Status {
+			fields = append(fields, "status")
+		}
+		if newSnap.Area != oldSnap.Area {
+			fields = append(fields, "area")
+		}
+		if len(fields) == 0 {
+			diffs := DiffJSON(string(oldBytes), string(newBytes))
+			for _, d := range diffs {
+				fields = append(fields, d.Field)
+				if len(fields) >= 4 {
+					break
+				}
+			}
+		}
+		title := newSnap.Title
+		if title == "" {
+			title = newSnap.UserTitle
+		}
+		if title == "" {
+			title = newSnap.Address
+		}
+		out = append(out, PriceChangeEvent{
+			ID:            c.id,
+			Category:      c.cat,
+			CategoryName:  categoryNames[c.cat],
+			Title:         title,
+			Address:       newSnap.Address,
+			Area:          c.area,
+			OldPrice:      oldSnap.Price,
+			NewPrice:      newSnap.Price,
+			PriceDelta:    delta,
+			PricePct:      pct,
+			ChangedFields: fields,
+			ChangedAt:     latestAt,
+			URL:           c.url,
+			Active:        c.active,
+		})
+	}
+	return out, nil
+}
+
+// CategoryAnalytics summarizes archive counts and pricing for one category.
+type CategoryAnalytics struct {
+	CategoryID   int     `json:"category_id"`
+	CategoryName string  `json:"category_name"`
+	Active       int64   `json:"active"`
+	Removed      int64   `json:"removed"`
+	AvgPrice     float64 `json:"avg_price"`
+	AvgMeter     float64 `json:"avg_meter"`
+}
+
+// ArchiveAnalyticsSummary provides high-level market & storage metrics.
+type ArchiveAnalyticsSummary struct {
+	TotalListings   int64               `json:"total_listings"`
+	ActiveListings  int64               `json:"active_listings"`
+	RemovedListings int64               `json:"removed_listings"`
+	UpdatedListings int64               `json:"updated_listings"`
+	TotalHistory    int64               `json:"total_history"`
+	AvgBlobBytes    int                 `json:"avg_blob_bytes"`
+	Categories      []CategoryAnalytics `json:"categories"`
+}
+
+// ArchiveAnalytics computes active/removed breakdowns and category market stats.
+func (s *Store) ArchiveAnalytics(ctx context.Context) (ArchiveAnalyticsSummary, error) {
+	var out ArchiveAnalyticsSummary
+	_ = s.ro.QueryRowContext(ctx, `
+		SELECT COUNT(*),
+		       COALESCE(SUM(CASE WHEN removed_at IS NULL THEN 1 ELSE 0 END), 0),
+		       COALESCE(SUM(CASE WHEN removed_at IS NOT NULL THEN 1 ELSE 0 END), 0),
+		       CAST(COALESCE(AVG(LENGTH(data_json)), 0) AS INTEGER)
+		FROM listings`).Scan(
+		&out.TotalListings, &out.ActiveListings, &out.RemovedListings, &out.AvgBlobBytes,
+	)
+	_ = s.ro.QueryRowContext(ctx, `SELECT COUNT(*) FROM listing_history`).Scan(&out.TotalHistory)
+	_ = s.ro.QueryRowContext(ctx, `SELECT COUNT(DISTINCT listing_id) FROM listing_history WHERE change_type = 'update'`).Scan(&out.UpdatedListings)
+
+	rows, err := s.ro.QueryContext(ctx, `
+		SELECT COALESCE(category, 0),
+		       SUM(CASE WHEN removed_at IS NULL THEN 1 ELSE 0 END) AS act,
+		       SUM(CASE WHEN removed_at IS NOT NULL THEN 1 ELSE 0 END) AS rem,
+		       COALESCE(AVG(CASE WHEN removed_at IS NULL AND price > 0 THEN price END), 0),
+		       COALESCE(AVG(CASE WHEN removed_at IS NULL AND meter_price > 0 THEN meter_price END), 0)
+		FROM listings
+		WHERE category IS NOT NULL
+		GROUP BY category
+		ORDER BY act DESC
+		LIMIT 20`)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var c CategoryAnalytics
+		if err := rows.Scan(&c.CategoryID, &c.Active, &c.Removed, &c.AvgPrice, &c.AvgMeter); err == nil {
+			c.CategoryName = categoryNames[c.CategoryID]
+			out.Categories = append(out.Categories, c)
+		}
+	}
+	return out, rows.Err()
 }
 
 // DBSizeMB returns the on-disk size of the SQLite database, including the

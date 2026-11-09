@@ -42,6 +42,8 @@ func main() {
 	categoriesFlag := fs.String("categories", "", `override category sets, e.g. "rent:1,5,4;sale:3,2" or "36" (applies to rent)`)
 	dryRunFlag := fs.Bool("dry-run", false, "fetch and log only; skip all database writes")
 	compactFlag := fs.Bool("compact", false, "compact, deduplicate noise history, and compress the SQLite database in-place, then exit")
+	inspectFlag := fs.Int64("inspect", 0, "inspect a single listing ID (metadata, version diffs, and full decompressed JSON), then exit")
+	radarFlag := fs.Bool("radar", false, "print archive analytics and recent price drops/updates from the database, then exit")
 
 	// Flag values are parsed into this default config first so we can detect
 	// which flags were explicitly set, then overlaid on the file config.
@@ -124,6 +126,61 @@ func main() {
 		os.Exit(1)
 	}
 	cancel()
+
+	if *inspectFlag > 0 {
+		ictx, icancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer icancel()
+		sum, err := store.InspectListing(ictx, *inspectFlag)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Listing %d not found: %v\n", *inspectFlag, err)
+			os.Exit(1)
+		}
+		hist, _ := store.ListingHistory(ictx, *inspectFlag, 50)
+		fmt.Printf("=== Listing #%d (%s) ===\n", sum.ID, sum.CategoryName)
+		fmt.Printf("Price: %.0f SAR | Area: %.1f m² | Beds: %d | Rooms: %d\n", sum.Price, sum.Area, sum.Beds, sum.Rooms)
+		fmt.Printf("Title: %s\nAddress: %s\nURL: %s\n", sum.Title, sum.Address, sum.URL)
+		fmt.Printf("First Seen: %s | Last Seen: %s (cycle %d) | Removed: %s\n", sum.FirstSeenAt, sum.LastSeenAt, sum.SeenCycle, sum.RemovedAt)
+		fmt.Printf("Storage: %d bytes compressed -> %d bytes raw (%.1fx lossless compression)\n",
+			sum.CompressedBytes, sum.RawBytes, float64(sum.RawBytes)/max(1.0, float64(sum.CompressedBytes)))
+		fmt.Printf("History Snapshots (%d):\n", len(hist))
+		var prev string
+		for i := len(hist) - 1; i >= 0; i-- {
+			h := hist[i]
+			fmt.Printf("  - [%s] %s", h.FetchedAt, h.ChangeType)
+			if h.DataJSON != "" {
+				if prev != "" {
+					diffs := DiffJSON(prev, h.DataJSON)
+					for _, d := range diffs {
+						fmt.Printf(" | %s: %v -> %v", d.Field, d.From, d.To)
+					}
+				}
+				prev = h.DataJSON
+			}
+			fmt.Println()
+		}
+		os.Exit(0)
+	}
+
+	if *radarFlag {
+		rctx, rcancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer rcancel()
+		an, err := store.ArchiveAnalytics(rctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Analytics failed: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("=== AQAR Archive Analytics (%s | %.1f MB) ===\n", cfg.DBPath, store.DBSizeMB())
+		fmt.Printf("Listings: %d total (%d active, %d removed, %d with history updates)\n",
+			an.TotalListings, an.ActiveListings, an.RemovedListings, an.UpdatedListings)
+		fmt.Printf("History:  %d snapshots | Avg compressed listing blob: %d bytes\n\n", an.TotalHistory, an.AvgBlobBytes)
+		fmt.Printf("=== Recent Price Drops ===\n")
+		drops, _ := store.RecentChanges(rctx, 15, true)
+		for _, d := range drops {
+			fmt.Printf("  #%d [%s] %.0f -> %.0f SAR (%.1f%%) | %s | %s\n",
+				d.ID, d.CategoryName, d.OldPrice, d.NewPrice, d.PricePct, d.ChangedAt, d.Title)
+		}
+		os.Exit(0)
+	}
 
 	if *reset {
 		if err := store.ClearState(context.Background()); err != nil {
